@@ -1,0 +1,12 @@
+{
+  "domain": "tv_show_monitor",
+  "name": "TV Show Monitor",
+  "codeowners": ["@conorod1992"],
+  "config_flow": true,
+  "documentation": "https://github.com/conorod1992/tv-show-monitor",
+  "issue_tracker": "https://github.com/conorod1992/tv-show-monitor/issues",
+  "iot_class": "cloud_polling",
+  "integration_type": "service",
+  "requirements": [],
+  "version": "1.0.0"
+}

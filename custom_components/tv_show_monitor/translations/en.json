@@ -1,0 +1,62 @@
+{
+  "title": "TV Show Monitor",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up TV Show Monitor",
+        "description": "Enter one TV show per line. TVmaze's highest-ranked search result will be used for each title.",
+        "data": {
+          "show_names": "TV show names"
+        },
+        "data_description": {
+          "show_names": "One show per line, up to 50 shows. Blank lines and exact case-insensitive duplicates are ignored."
+        }
+      }
+    },
+    "error": {
+      "no_shows": "Enter at least one TV show.",
+      "too_many_shows": "Enter no more than 50 TV shows.",
+      "show_not_found": "TVmaze could not find “{title}”. Check the title and try again.",
+      "duplicate_resolved_show": "“{title}” resolves to a TVmaze show already in this list.",
+      "already_configured_show": "One or more resolved TVmaze shows are already configured.",
+      "cannot_connect": "Could not connect to TVmaze while resolving “{title}”. Try again later."
+    },
+    "abort": {
+      "already_configured": "TV Show Monitor is already configured. Edit its options to change the show list."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TV Show Monitor options",
+        "description": "Add, remove, or edit shows by replacing this list. Changing options reloads the integration.",
+        "data": {
+          "show_names": "TV show names",
+          "poll_interval_hours": "Polling interval"
+        },
+        "data_description": {
+          "show_names": "One show per line. Every title is resolved again against TVmaze.",
+          "poll_interval_hours": "Hours between checks. The minimum is 24 hours and values use 24-hour steps."
+        }
+      }
+    },
+    "error": {
+      "no_shows": "Enter at least one TV show.",
+      "too_many_shows": "Enter no more than 50 TV shows.",
+      "show_not_found": "TVmaze could not find “{title}”. Check the title and try again.",
+      "duplicate_resolved_show": "“{title}” resolves to a TVmaze show already in this list.",
+      "already_configured_show": "One or more resolved TVmaze shows are already configured.",
+      "cannot_connect": "Could not connect to TVmaze while resolving “{title}”. Try again later.",
+      "poll_interval_too_short": "The polling interval cannot be shorter than 24 hours.",
+      "poll_interval_too_long": "The polling interval cannot be longer than 744 hours.",
+      "poll_interval_invalid_step": "Use a polling interval in 24-hour steps."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_episode": {
+        "name": "Next Episode"
+      }
+    }
+  }
+}
