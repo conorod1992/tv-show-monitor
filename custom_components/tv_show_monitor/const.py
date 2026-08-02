@@ -1,0 +1,138 @@
+"""Constants and typed models for TV Show Monitor."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Any
+
+DOMAIN = "tv_show_monitor"
+NAME = "TV Show Monitor"
+VERSION = "1.0.0"
+API_BASE_URL = "https://api.tvmaze.com"
+USER_AGENT = "TV-Show-Monitor/HomeAssistant"
+DEFAULT_POLL_INTERVAL_HOURS = 24
+MIN_POLL_INTERVAL_HOURS = 24
+MAX_POLL_INTERVAL_HOURS = 24 * 31
+MAX_SHOWS = 50
+CONF_SHOWS = "shows"
+CONF_SHOW_NAMES = "show_names"
+CONF_POLL_INTERVAL = "poll_interval_hours"
+PLATFORMS = ["sensor"]
+STORAGE_VERSION = 1
+STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
+NO_NEXT_EPISODE = "No next episode found"
+
+
+@dataclass(frozen=True, slots=True)
+class ConfiguredShow:
+    """A TVmaze show selected by the user."""
+
+    tvmaze_id: int
+    canonical_name: str
+    entered_name: str
+    show_url: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a serialisable representation."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> ConfiguredShow:
+        """Create a configured show from stored config-entry data."""
+        return cls(
+            tvmaze_id=int(value["tvmaze_id"]),
+            canonical_name=str(value["canonical_name"]),
+            entered_name=str(value["entered_name"]),
+            show_url=str(value["show_url"]) if value.get("show_url") else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeInfo:
+    """A scheduled TVmaze episode."""
+
+    episode_id: int
+    name: str
+    season: int | None
+    number: int | None
+    episode_type: str | None
+    air_date: str
+    air_time: str | None
+    air_stamp: str | None
+    runtime: int | None
+    url: str | None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a serialisable representation."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> EpisodeInfo:
+        """Create episode information from storage."""
+        return cls(
+            episode_id=int(value["episode_id"]),
+            name=str(value["name"]),
+            season=_optional_int(value.get("season")),
+            number=_optional_int(value.get("number")),
+            episode_type=_optional_str(value.get("episode_type")),
+            air_date=str(value["air_date"]),
+            air_time=_optional_str(value.get("air_time")),
+            air_stamp=_optional_str(value.get("air_stamp")),
+            runtime=_optional_int(value.get("runtime")),
+            url=_optional_str(value.get("url")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LastKnownState:
+    """Persisted last-known state and latest refresh diagnostics."""
+
+    has_successful_value: bool = False
+    episode: EpisodeInfo | None = None
+    last_successful_update: str | None = None
+    last_update_attempt: str | None = None
+    last_attempt_successful: bool | None = None
+    last_error: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a serialisable representation."""
+        value = asdict(self)
+        value["episode"] = self.episode.as_dict() if self.episode else None
+        return value
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> LastKnownState:
+        """Create state from storage."""
+        episode = value.get("episode")
+        return cls(
+            has_successful_value=bool(value.get("has_successful_value", False)),
+            episode=EpisodeInfo.from_dict(episode)
+            if isinstance(episode, dict)
+            else None,
+            last_successful_update=_optional_str(value.get("last_successful_update")),
+            last_update_attempt=_optional_str(value.get("last_update_attempt")),
+            last_attempt_successful=value.get("last_attempt_successful"),
+            last_error=_optional_str(value.get("last_error")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ShowUpdateResult:
+    """The complete entity-facing result for one show."""
+
+    show: ConfiguredShow
+    state: LastKnownState
+
+
+def utc_now_iso() -> str:
+    """Return an ISO timestamp for persistent diagnostics."""
+    return datetime.now().astimezone().isoformat()
+
+
+def _optional_int(value: Any) -> int | None:
+    return int(value) if value is not None else None
+
+
+def _optional_str(value: Any) -> str | None:
+    return str(value) if value is not None else None
