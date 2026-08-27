@@ -123,15 +123,35 @@ async def test_successful_response_without_next_episode(payload):
 @pytest.mark.parametrize(
     ("status", "error"),
     [
+        (400, TVMazeError),
         (404, TVMazeNotFoundError),
-        (500, TVMazeError),
     ],
 )
-async def test_http_errors(status, error):
+async def test_non_retryable_http_errors(status, error):
     with pytest.raises(error):
         await TVMazeClient(
             FakeSession(FakeResponse(status=status))
         ).async_get_next_episode(216)
+
+
+async def test_transient_http_error_retries_then_succeeds():
+    payload = {"id": 216, "name": "Severance", "_embedded": {}}
+    client = TVMazeClient(
+        FakeSession(FakeResponse(status=503), FakeResponse(payload=payload))
+    )
+    with patch("custom_components.tv_show_monitor.api.asyncio.sleep") as sleep:
+        result = await client.async_get_next_episode(216)
+    assert result is None
+    sleep.assert_awaited_once()
+
+
+async def test_transient_http_error_retries_once_then_raises():
+    client = TVMazeClient(FakeSession(FakeResponse(status=500), FakeResponse(status=500)))
+    with (
+        patch("custom_components.tv_show_monitor.api.asyncio.sleep"),
+        pytest.raises(TVMazeError, match="HTTP 500"),
+    ):
+        await client.async_get_next_episode(216)
 
 
 async def test_http_429_retries_then_raises():
@@ -145,11 +165,15 @@ async def test_http_429_retries_then_raises():
         await client.async_get_next_episode(216)
 
 
-async def test_timeout():
-    with patch("custom_components.tv_show_monitor.api.asyncio.timeout") as timeout:
-        timeout.return_value.__aenter__.side_effect = TimeoutError
+async def test_timeout_retries_once_then_raises():
+    with (
+        patch("custom_components.tv_show_monitor.api.asyncio.timeout") as timeout,
+        patch("custom_components.tv_show_monitor.api.asyncio.sleep") as sleep,
+    ):
+        timeout.return_value.__aenter__.side_effect = [TimeoutError, TimeoutError]
         with pytest.raises(TVMazeError, match="timed out"):
             await TVMazeClient(FakeSession()).async_get_next_episode(216)
+    sleep.assert_awaited_once()
 
 
 async def test_malformed_json():
