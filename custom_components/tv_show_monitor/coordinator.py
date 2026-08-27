@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import replace
 from datetime import timedelta
@@ -23,6 +24,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+MAX_CONCURRENT_REQUESTS = 5
 
 
 class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]]):
@@ -55,25 +57,43 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         """Restore valid state and prune deliberately removed shows."""
         try:
             stored = await self._store.async_load() or {}
-            raw_states = stored.get("shows", {})
-            if isinstance(raw_states, dict):
-                for show in self.shows:
-                    raw = raw_states.get(str(show.tvmaze_id))
-                    if isinstance(raw, dict):
-                        try:
-                            self._states[show.tvmaze_id] = LastKnownState.from_dict(raw)
-                        except KeyError, TypeError, ValueError:
-                            _LOGGER.warning(
-                                "Ignoring invalid persisted state for TVmaze show ID %s",
-                                show.tvmaze_id,
-                            )
-            await self._async_save()
         except Exception as err:  # Storage backends can raise implementation errors.
             _LOGGER.error("Unable to load TV Show Monitor persistent state: %s", err)
+            return
+
+        raw_states = stored.get("shows", {})
+        if isinstance(raw_states, dict):
+            for show in self.shows:
+                raw = raw_states.get(str(show.tvmaze_id))
+                if isinstance(raw, dict):
+                    try:
+                        self._states[show.tvmaze_id] = LastKnownState.from_dict(raw)
+                    except KeyError, TypeError, ValueError:
+                        _LOGGER.warning(
+                            "Ignoring invalid persisted state for TVmaze show ID %s",
+                            show.tvmaze_id,
+                        )
+        await self._async_save()
 
     async def _async_update_data(self) -> dict[int, ShowUpdateResult]:
         """Refresh every configured show, preserving last-good state on errors."""
-        for show in self.shows:
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        await asyncio.gather(
+            *(self._async_refresh_show(show, semaphore) for show in self.shows)
+        )
+        await self._async_save()
+        return {
+            show.tvmaze_id: ShowUpdateResult(
+                show, self._states.get(show.tvmaze_id, LastKnownState())
+            )
+            for show in self.shows
+        }
+
+    async def _async_refresh_show(
+        self, show: ConfiguredShow, semaphore: asyncio.Semaphore
+    ) -> None:
+        """Refresh one show while respecting the per-cycle concurrency limit."""
+        async with semaphore:
             attempt = utc_now_iso()
             previous = self._states.get(show.tvmaze_id, LastKnownState())
             try:
@@ -121,13 +141,6 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     last_update_attempt=attempt,
                     last_attempt_successful=True,
                 )
-        await self._async_save()
-        return {
-            show.tvmaze_id: ShowUpdateResult(
-                show, self._states.get(show.tvmaze_id, LastKnownState())
-            )
-            for show in self.shows
-        }
 
     async def _async_save(self) -> None:
         """Atomically save all current states through Home Assistant's Store."""
