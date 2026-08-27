@@ -158,6 +158,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     last_attempt_successful=True,
                     show_status=schedule.show_status,
                     previous_episode=schedule.previous_episode,
+                    show_image_url=schedule.show_image_url,
                 )
 
     async def _async_save(self) -> None:

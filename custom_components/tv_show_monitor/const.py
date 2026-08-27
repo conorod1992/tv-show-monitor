@@ -92,6 +92,7 @@ class ShowScheduleInfo:
     show_status: str | None
     next_episode: EpisodeInfo | None
     previous_episode: EpisodeInfo | None
+    show_image_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,7 @@ class LastKnownState:
     last_error: str | None = None
     show_status: str | None = None
     previous_episode: EpisodeInfo | None = None
+    show_image_url: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a serialisable representation."""
@@ -134,6 +136,7 @@ class LastKnownState:
             previous_episode=EpisodeInfo.from_dict(previous_episode)
             if isinstance(previous_episode, dict)
             else None,
+            show_image_url=_optional_str(value.get("show_image_url")),
         )
 
 

@@ -121,7 +121,7 @@ class TVMazeClient:
         return candidates[0].as_configured_show(query) if candidates else None
 
     async def async_get_show_schedule(self, tvmaze_id: int) -> ShowScheduleInfo:
-        """Return show status plus the previous and next scheduled episodes."""
+        """Return show status, artwork and previous/next scheduled episodes."""
         payload = await self._async_get(
             f"/shows/{tvmaze_id}",
             params={"embed[]": ["nextepisode", "previousepisode"]},
@@ -141,6 +141,7 @@ class TVMazeClient:
             show_status=_optional_str_loose(payload.get("status")),
             next_episode=_parse_episode(embedded.get("nextepisode")),
             previous_episode=_parse_episode(embedded.get("previousepisode")),
+            show_image_url=_show_image_url(payload),
         )
 
     async def async_get_next_episode(self, tvmaze_id: int) -> EpisodeInfo | None:
@@ -266,6 +267,17 @@ def _show_country_name(show: dict[str, Any]) -> str | None:
             name = country.get("name")
             if isinstance(name, str):
                 return name
+    return None
+
+
+def _show_image_url(show: dict[str, Any]) -> str | None:
+    image = show.get("image")
+    if not isinstance(image, dict):
+        return None
+    for key in ("medium", "original"):
+        value = image.get(key)
+        if isinstance(value, str) and value:
+            return value
     return None
 
 
