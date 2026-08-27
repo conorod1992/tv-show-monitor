@@ -28,9 +28,7 @@ def test_ended_show_is_rechecked_after_monthly_interval():
         has_successful_value=True,
         show_status="Ended",
         episode=None,
-        last_successful_update=(
-            now - timedelta(days=ENDED_RECHECK_DAYS)
-        ).isoformat(),
+        last_successful_update=(now - timedelta(days=ENDED_RECHECK_DAYS)).isoformat(),
     )
     assert not _should_skip_ended_refresh(state, now)
 
