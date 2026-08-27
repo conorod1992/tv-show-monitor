@@ -358,7 +358,9 @@ class TVShowMonitorOptionsFlow(OptionsFlowWithReload):
     def _finish_add(self, candidate: ShowSearchCandidate) -> ConfigFlowResult:
         current = _entry_shows(self.config_entry)
         if candidate.tvmaze_id in {show.tvmaze_id for show in current}:
-            return self._candidate_form("add_select", {"base": "duplicate_resolved_show"})
+            return self._candidate_form(
+                "add_select", {"base": "duplicate_resolved_show"}
+            )
         assert self._pending_query is not None
         return self._save_options(
             (*current, candidate.as_configured_show(self._pending_query))
@@ -462,9 +464,7 @@ def _show_choice_schema(shows: tuple[ConfiguredShow, ...]) -> vol.Schema:
     )
 
 
-def _poll_interval_schema(
-    values: dict[str, Any] | None, current: int
-) -> vol.Schema:
+def _poll_interval_schema(values: dict[str, Any] | None, current: int) -> vol.Schema:
     return vol.Schema(
         {
             vol.Required(
@@ -519,7 +519,11 @@ def _automatic_candidate(
 ) -> ShowSearchCandidate | None:
     if len(candidates) == 1:
         return candidates[0]
-    exact = [candidate for candidate in candidates if candidate.name.casefold() == query.casefold()]
+    exact = [
+        candidate
+        for candidate in candidates
+        if candidate.name.casefold() == query.casefold()
+    ]
     return exact[0] if len(exact) == 1 else None
 
 
@@ -527,7 +531,8 @@ def _candidate_by_id(
     candidates: list[ShowSearchCandidate], tvmaze_id: int
 ) -> ShowSearchCandidate | None:
     return next(
-        (candidate for candidate in candidates if candidate.tvmaze_id == tvmaze_id), None
+        (candidate for candidate in candidates if candidate.tvmaze_id == tvmaze_id),
+        None,
     )
 
 
