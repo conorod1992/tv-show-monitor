@@ -32,14 +32,19 @@ Go to **Settings → Devices & services → Add integration**, search for **TV S
 Monitor**, and enter one show per line. Whitespace and blank lines are ignored;
 exact duplicate entries are removed case-insensitively. Up to 50 shows are allowed.
 
-During setup, every entered title is searched using TVmaze's show-search API.
-Exact programme matching is initially based on TVmaze's highest-ranked search
-result. Setup is rejected in full if any title cannot be resolved or two titles
-resolve to the same show. Routine polling uses the saved TVmaze ID, not the title.
+During setup, every entered title is searched using TVmaze's show-search API. A
+single result, or one clear exact-title result among differently named results, is
+selected automatically. If TVmaze returns multiple plausible same-title matches,
+TV Show Monitor asks you to choose and shows useful metadata such as premiere year,
+country, network or web channel, and status. Setup is rejected in full if any title
+cannot be resolved or two titles resolve to the same show. Routine polling uses the
+saved TVmaze ID, not the title.
 
-To add, remove, or rename entries later, open the integration's **Configure**
-dialog and replace the complete list. Existing titles retain their saved TVmaze
-match, so only newly added or renamed titles need to be searched again.
+Open the integration's **Configure** dialog to manage shows through dedicated
+**Add show**, **Remove show**, and **Change TVmaze match** flows. Adding a show only
+searches the new title; removing a show performs no title lookup. Changing a match
+lets you search again and explicitly select the correct TVmaze result. Polling
+interval changes are handled separately and never rematch shows.
 
 ## Sensor states
 
@@ -116,15 +121,13 @@ TV Show Monitor is not affiliated with or endorsed by TVmaze.
 
 ## Known limitations
 
-- Matching always accepts TVmaze's highest-ranked result; there is no interactive
-  result picker yet.
 - TVmaze only reports publicly scheduled future episodes.
 - Polling intervals use whole 24-hour steps and cannot be shorter than one day.
 
 ## Troubleshooting
 
-- If the wrong show is matched, use a more specific title, including the year or
-  country when helpful, and review the result on TVmaze.
+- If the wrong show is matched, open **Configure → Change TVmaze match** and choose
+  the correct search result.
 - If a sensor says `No next episode found`, TVmaze currently has no scheduled next
   episode. This is not an error.
 - If `last_attempt_successful` is false, check Home Assistant logs and wait for the

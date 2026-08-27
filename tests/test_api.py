@@ -72,6 +72,40 @@ async def test_successful_title_search():
     assert result.entered_name == "Severance"
 
 
+async def test_title_search_candidates_include_disambiguation_metadata():
+    client = TVMazeClient(
+        FakeSession(
+            FakeResponse(
+                payload=[
+                    {
+                        "score": 1.0,
+                        "show": {
+                            "id": 526,
+                            "name": "The Office",
+                            "url": "https://tvmaze.test/526",
+                            "premiered": "2005-03-24",
+                            "status": "Ended",
+                            "network": {
+                                "name": "NBC",
+                                "country": {"name": "United States"},
+                            },
+                        },
+                    },
+                    {"score": 0.5, "show": {"id": "bad", "name": "Broken"}},
+                ]
+            )
+        )
+    )
+    results = await client.async_search_shows("The Office")
+    assert len(results) == 1
+    assert results[0].tvmaze_id == 526
+    assert results[0].premiered == "2005-03-24"
+    assert results[0].network == "NBC"
+    assert results[0].country == "United States"
+    assert results[0].status == "Ended"
+    assert results[0].label == "The Office — 2005 · United States · NBC · Ended"
+
+
 async def test_no_title_search_results():
     assert (
         await TVMazeClient(FakeSession(FakeResponse(payload=[]))).async_search_show(

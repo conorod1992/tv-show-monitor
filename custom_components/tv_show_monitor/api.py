@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -17,6 +18,7 @@ MAX_RETRIES = 1
 MAX_RETRY_AFTER = 30.0
 RETRY_DELAY = 1.0
 RETRYABLE_STATUSES = {500, 502, 503, 504}
+MAX_SEARCH_CANDIDATES = 10
 
 
 class TVMazeError(Exception):
@@ -35,35 +37,82 @@ class TVMazeResponseError(TVMazeError):
     """TVmaze returned malformed or unexpected data."""
 
 
+@dataclass(frozen=True, slots=True)
+class ShowSearchCandidate:
+    """A TVmaze search result with enough metadata for user disambiguation."""
+
+    tvmaze_id: int
+    name: str
+    url: str | None
+    premiered: str | None
+    status: str | None
+    network: str | None
+    country: str | None
+
+    def as_configured_show(self, entered_name: str) -> ConfiguredShow:
+        """Convert this candidate into persistent configuration."""
+        return ConfiguredShow(self.tvmaze_id, self.name, entered_name, self.url)
+
+    @property
+    def label(self) -> str:
+        """Return a compact human-readable candidate label."""
+        details: list[str] = []
+        if self.premiered:
+            details.append(self.premiered[:4])
+        if self.country:
+            details.append(self.country)
+        if self.network:
+            details.append(self.network)
+        if self.status:
+            details.append(self.status)
+        return f"{self.name} — {' · '.join(details)}" if details else self.name
+
+
 class TVMazeClient:
     """Small typed client using Home Assistant's shared aiohttp session."""
 
     def __init__(self, session: ClientSession) -> None:
         self._session = session
 
-    async def async_search_show(self, query: str) -> ConfiguredShow | None:
-        """Resolve a title to TVmaze's highest-ranked search result."""
+    async def async_search_shows(self, query: str) -> list[ShowSearchCandidate]:
+        """Return ranked TVmaze search candidates for a title."""
         payload = await self._async_get("/search/shows", params={"q": query})
         if not isinstance(payload, list):
             raise TVMazeResponseError("Unexpected title-search response")
-        if not payload:
-            return None
-        first = payload[0]
-        if not isinstance(first, dict) or not isinstance(first.get("show"), dict):
-            raise TVMazeResponseError("Unexpected title-search result")
-        show = first["show"]
-        show_id = show.get("id")
-        name = show.get("name")
-        if (
-            not isinstance(show_id, int)
-            or not isinstance(name, str)
-            or not name.strip()
-        ):
-            raise TVMazeResponseError("Search result is missing required show data")
-        url = show.get("url")
-        if url is not None and not isinstance(url, str):
-            raise TVMazeResponseError("Search result contains an invalid show URL")
-        return ConfiguredShow(show_id, name.strip(), query, url)
+
+        candidates: list[ShowSearchCandidate] = []
+        for item in payload[:MAX_SEARCH_CANDIDATES]:
+            if not isinstance(item, dict) or not isinstance(item.get("show"), dict):
+                continue
+            show = item["show"]
+            show_id = show.get("id")
+            name = show.get("name")
+            if (
+                not isinstance(show_id, int)
+                or not isinstance(name, str)
+                or not name.strip()
+            ):
+                continue
+            url = show.get("url")
+            if url is not None and not isinstance(url, str):
+                url = None
+            candidates.append(
+                ShowSearchCandidate(
+                    tvmaze_id=show_id,
+                    name=name.strip(),
+                    url=url,
+                    premiered=_optional_str_loose(show.get("premiered")),
+                    status=_optional_str_loose(show.get("status")),
+                    network=_show_network_name(show),
+                    country=_show_country_name(show),
+                )
+            )
+        return candidates
+
+    async def async_search_show(self, query: str) -> ConfiguredShow | None:
+        """Resolve a title to TVmaze's highest-ranked search result."""
+        candidates = await self.async_search_shows(query)
+        return candidates[0].as_configured_show(query) if candidates else None
 
     async def async_get_next_episode(self, tvmaze_id: int) -> EpisodeInfo | None:
         """Return the next episode, or None after a valid no-episode response."""
@@ -175,6 +224,33 @@ def _retry_delay(response: ClientResponse) -> float:
             return min(MAX_RETRY_AFTER, max(0.0, delay))
         except KeyError, TypeError, ValueError:
             return RETRY_DELAY
+
+
+def _show_network_name(show: dict[str, Any]) -> str | None:
+    for key in ("network", "webChannel"):
+        value = show.get(key)
+        if isinstance(value, dict):
+            name = value.get("name")
+            if isinstance(name, str):
+                return name
+    return None
+
+
+def _show_country_name(show: dict[str, Any]) -> str | None:
+    for key in ("network", "webChannel"):
+        value = show.get(key)
+        if not isinstance(value, dict):
+            continue
+        country = value.get("country")
+        if isinstance(country, dict):
+            name = country.get("name")
+            if isinstance(name, str):
+                return name
+    return None
+
+
+def _optional_str_loose(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _optional_int(data: dict[str, Any], key: str) -> int | None:
