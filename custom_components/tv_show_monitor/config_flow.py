@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 import voluptuous as vol
@@ -100,8 +101,8 @@ class TVShowMonitorOptionsFlow(OptionsFlowWithReload):
             elif interval % 24:
                 errors[CONF_POLL_INTERVAL] = "poll_interval_invalid_step"
             else:
-                shows, error, failing_title = await _async_resolve_names(
-                    self.hass, names
+                shows, error, failing_title = await _async_resolve_options_names(
+                    self.hass, names, _entry_shows(self.config_entry)
                 )
                 if error:
                     errors["base"] = error
@@ -212,6 +213,41 @@ async def _async_resolve_names(
             return [], "duplicate_resolved_show", name
         ids.add(show.tvmaze_id)
         shows.append(show)
+    return shows, None, None
+
+
+async def _async_resolve_options_names(
+    hass: Any,
+    names: list[str],
+    current: tuple[ConfiguredShow, ...],
+) -> tuple[list[ConfiguredShow], str | None, str | None]:
+    """Resolve only new or renamed options entries and retain stable matches."""
+    existing_by_name = {show.entered_name.casefold(): show for show in current}
+    client: TVMazeClient | None = None
+    shows: list[ConfiguredShow] = []
+    ids: set[int] = set()
+
+    for name in names:
+        show = existing_by_name.get(name.casefold())
+        if show is not None:
+            show = replace(show, entered_name=name)
+        else:
+            if client is None:
+                client = TVMazeClient(async_get_clientsession(hass))
+            try:
+                show = await client.async_search_show(name)
+            except TVMazeError as err:
+                _LOGGER.warning("Failed to resolve TV show title %r: %s", name, err)
+                return [], "cannot_connect", name
+            if show is None:
+                _LOGGER.info("TVmaze returned no result for title %r", name)
+                return [], "show_not_found", name
+
+        if show.tvmaze_id in ids:
+            return [], "duplicate_resolved_show", name
+        ids.add(show.tvmaze_id)
+        shows.append(show)
+
     return shows, None, None
 
 
