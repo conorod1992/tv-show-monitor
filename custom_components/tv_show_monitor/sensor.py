@@ -47,6 +47,11 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
         return state.episode.air_date
 
     @property
+    def entity_picture(self) -> str | None:
+        """Use TVmaze's show artwork when available."""
+        return self.result.state.show_image_url
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose show, episode, schedule and safe refresh diagnostics."""
         result = self.result
