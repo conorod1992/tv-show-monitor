@@ -138,9 +138,7 @@ class TVMazeClient:
                                 )
                                 await asyncio.sleep(RETRY_DELAY)
                                 continue
-                            raise TVMazeError(
-                                f"TVmaze returned HTTP {response.status}"
-                            )
+                            raise TVMazeError(f"TVmaze returned HTTP {response.status}")
                         if response.status == 404:
                             raise TVMazeNotFoundError("TVmaze resource not found")
                         if response.status >= 400:
