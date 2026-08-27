@@ -87,7 +87,11 @@ class TVMazeClient:
             show = item["show"]
             show_id = show.get("id")
             name = show.get("name")
-            if not isinstance(show_id, int) or not isinstance(name, str) or not name.strip():
+            if (
+                not isinstance(show_id, int)
+                or not isinstance(name, str)
+                or not name.strip()
+            ):
                 continue
             url = show.get("url")
             if url is not None and not isinstance(url, str):
