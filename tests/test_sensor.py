@@ -20,7 +20,7 @@ def make_sensor(severance, state):
     return TVShowNextEpisodeSensor(coordinator, severance)
 
 
-def test_date_state_stable_identity_attributes_and_device(severance, episode):
+def test_date_state_stable_identity_attributes_device_and_artwork(severance, episode):
     sensor = make_sensor(
         severance,
         LastKnownState(
@@ -31,6 +31,7 @@ def test_date_state_stable_identity_attributes_and_device(severance, episode):
             True,
             show_status="Running",
             previous_episode=episode,
+            show_image_url="https://static.tvmaze.test/severance-medium.jpg",
         ),
     )
     with patch(
@@ -40,6 +41,7 @@ def test_date_state_stable_identity_attributes_and_device(severance, episode):
         attributes = sensor.extra_state_attributes
     assert sensor.native_value == "2026-10-12"
     assert sensor.unique_id == f"{DOMAIN}_216_next_episode"
+    assert sensor.entity_picture == "https://static.tvmaze.test/severance-medium.jpg"
     assert attributes["episode_code"] == "S02E04"
     assert attributes["episode_name"] == episode.name
     assert attributes["show_status"] == "Running"
@@ -57,6 +59,7 @@ def test_no_next_episode_state(severance):
     )
     assert sensor.available
     assert sensor.native_value == "No next episode found"
+    assert sensor.entity_picture is None
     assert sensor.extra_state_attributes["next_episode_found"] is False
 
 
@@ -64,15 +67,25 @@ def test_initial_unavailable_state(severance):
     sensor = make_sensor(severance, LastKnownState())
     assert not sensor.available
     assert sensor.native_value is None
+    assert sensor.entity_picture is None
 
 
 def test_failed_refresh_retains_state_and_sets_diagnostics(severance, episode):
     sensor = make_sensor(
         severance,
-        LastKnownState(True, episode, "saved", "latest", False, "request timed out"),
+        LastKnownState(
+            True,
+            episode,
+            "saved",
+            "latest",
+            False,
+            "request timed out",
+            show_image_url="https://static.tvmaze.test/severance-medium.jpg",
+        ),
     )
     assert sensor.available
     assert sensor.native_value == episode.air_date
+    assert sensor.entity_picture == "https://static.tvmaze.test/severance-medium.jpg"
     attributes = sensor.extra_state_attributes
     assert attributes["episode_name"] == episode.name
     assert attributes["last_attempt_successful"] is False
