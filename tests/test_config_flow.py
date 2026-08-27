@@ -18,6 +18,7 @@ from custom_components.tv_show_monitor.config_flow import (
     CONF_CANDIDATE_ID,
     CONF_SHOW_ID,
     CONF_SHOW_NAME,
+    _poll_interval_error,
 )
 from custom_components.tv_show_monitor.const import (
     CONF_POLL_INTERVAL,
@@ -310,8 +311,7 @@ async def test_poll_interval_change_never_searches_tvmaze(hass, severance):
     search.assert_not_awaited()
 
 
-@pytest.mark.parametrize("interval", [1, 25, 745])
-async def test_poll_interval_validation(hass, severance, interval):
+async def test_poll_interval_invalid_step(hass, severance):
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_SHOWS: [severance.as_dict()]},
@@ -323,6 +323,18 @@ async def test_poll_interval_validation(hass, severance, interval):
         result["flow_id"], {"next_step_id": "poll_interval"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_POLL_INTERVAL: interval}
+        result["flow_id"], {CONF_POLL_INTERVAL: 25}
     )
     assert result["type"] is FlowResultType.FORM
+    assert result["errors"][CONF_POLL_INTERVAL] == "poll_interval_invalid_step"
+
+
+@pytest.mark.parametrize(
+    ("interval", "error"),
+    [
+        (1, "poll_interval_too_short"),
+        (745, "poll_interval_too_long"),
+    ],
+)
+def test_poll_interval_boundary_validation(interval, error):
+    assert _poll_interval_error(interval) == error
