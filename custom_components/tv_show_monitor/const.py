@@ -15,6 +15,7 @@ DEFAULT_POLL_INTERVAL_HOURS = 24
 MIN_POLL_INTERVAL_HOURS = 24
 MAX_POLL_INTERVAL_HOURS = 24 * 31
 MAX_SHOWS = 50
+MISSING_SHOW_404_THRESHOLD = 3
 CONF_SHOWS = "shows"
 CONF_SHOW_NAMES = "show_names"
 CONF_POLL_INTERVAL = "poll_interval_hours"
@@ -108,6 +109,7 @@ class LastKnownState:
     show_status: str | None = None
     previous_episode: EpisodeInfo | None = None
     show_image_url: str | None = None
+    consecutive_not_found: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         """Return a serialisable representation."""
@@ -123,6 +125,7 @@ class LastKnownState:
         """Create state from storage."""
         episode = value.get("episode")
         previous_episode = value.get("previous_episode")
+        consecutive_not_found = value.get("consecutive_not_found", 0)
         return cls(
             has_successful_value=bool(value.get("has_successful_value", False)),
             episode=EpisodeInfo.from_dict(episode)
@@ -137,6 +140,7 @@ class LastKnownState:
             if isinstance(previous_episode, dict)
             else None,
             show_image_url=_optional_str(value.get("show_image_url")),
+            consecutive_not_found=max(0, int(consecutive_not_found)),
         )
 
 

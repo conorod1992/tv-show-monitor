@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from custom_components.tv_show_monitor.const import (
     DOMAIN,
+    MISSING_SHOW_404_THRESHOLD,
     LastKnownState,
     ShowUpdateResult,
 )
@@ -49,6 +50,8 @@ def test_date_state_stable_identity_attributes_device_and_artwork(severance, epi
     assert attributes["next_airing"] == episode.air_stamp
     assert attributes["previous_episode_name"] == episode.name
     assert attributes["previous_episode_code"] == "S02E04"
+    assert attributes["consecutive_not_found"] == 0
+    assert attributes["missing_from_tvmaze"] is False
     assert sensor.device_info["identifiers"] == {(DOMAIN, "216")}
     assert sensor.device_info["manufacturer"] == "TVmaze"
 
@@ -90,3 +93,27 @@ def test_failed_refresh_retains_state_and_sets_diagnostics(severance, episode):
     assert attributes["episode_name"] == episode.name
     assert attributes["last_attempt_successful"] is False
     assert attributes["last_error"] == "request timed out"
+
+
+def test_persistent_not_found_marks_sensor_unavailable_but_retains_data(
+    severance, episode
+):
+    sensor = make_sensor(
+        severance,
+        LastKnownState(
+            True,
+            episode,
+            "saved",
+            "latest",
+            False,
+            "TVmaze resource not found",
+            show_image_url="https://static.tvmaze.test/severance-medium.jpg",
+            consecutive_not_found=MISSING_SHOW_404_THRESHOLD,
+        ),
+    )
+    assert not sensor.available
+    assert sensor.native_value == episode.air_date
+    assert sensor.entity_picture == "https://static.tvmaze.test/severance-medium.jpg"
+    attributes = sensor.extra_state_attributes
+    assert attributes["consecutive_not_found"] == MISSING_SHOW_404_THRESHOLD
+    assert attributes["missing_from_tvmaze"] is True

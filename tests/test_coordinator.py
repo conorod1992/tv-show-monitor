@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.tv_show_monitor.api import TVMazeError
+from custom_components.tv_show_monitor.api import TVMazeError, TVMazeNotFoundError
 from custom_components.tv_show_monitor.const import (
     EVENT_SCHEDULE_CHANGED,
+    MISSING_SHOW_404_THRESHOLD,
     ConfiguredShow,
     LastKnownState,
     ShowScheduleInfo,
@@ -91,6 +92,60 @@ async def test_failed_show_retains_previous_no_episode(hass, severance):
     assert data[216].state.last_attempt_successful is False
 
 
+async def test_persistent_404s_create_repair_and_retain_last_good(
+    hass, severance, episode
+):
+    coordinator = make_coordinator(
+        hass,
+        [severance],
+        [TVMazeNotFoundError("missing")] * MISSING_SHOW_404_THRESHOLD,
+    )
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True,
+        episode=episode,
+        last_successful_update="old",
+    )
+    with patch(
+        "custom_components.tv_show_monitor.coordinator.async_create_missing_show_issue"
+    ) as create_issue:
+        for expected_count in range(1, MISSING_SHOW_404_THRESHOLD + 1):
+            data = await coordinator._async_update_data()
+            assert data[216].state.episode == episode
+            assert data[216].state.consecutive_not_found == expected_count
+    create_issue.assert_called_once_with(hass, "test", severance)
+
+
+async def test_transient_failure_does_not_reset_not_found_counter(
+    hass, severance, episode
+):
+    coordinator = make_coordinator(hass, [severance], [TVMazeError("timeout")])
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True,
+        episode=episode,
+        consecutive_not_found=2,
+    )
+    data = await coordinator._async_update_data()
+    assert data[216].state.consecutive_not_found == 2
+
+
+async def test_success_after_404s_resets_counter_and_clears_repair(
+    hass, severance, episode
+):
+    coordinator = make_coordinator(hass, [severance], [episode])
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True,
+        episode=episode,
+        consecutive_not_found=MISSING_SHOW_404_THRESHOLD,
+    )
+    with patch(
+        "custom_components.tv_show_monitor.coordinator.async_delete_missing_show_issue"
+    ) as delete_issue:
+        data = await coordinator._async_update_data()
+    assert data[216].state.consecutive_not_found == 0
+    assert data[216].state.last_attempt_successful is True
+    delete_issue.assert_called_once_with(hass, "test", 216)
+
+
 async def test_successful_no_episode_clears_old_episode(hass, severance, episode):
     coordinator = make_coordinator(hass, [severance], [None])
     coordinator._states[216] = LastKnownState(
@@ -119,6 +174,7 @@ async def test_persisted_state_restored_after_restart(hass, severance, episode):
                 last_successful_update="saved",
                 show_status="Running",
                 previous_episode=episode,
+                consecutive_not_found=2,
             ).as_dict()
         }
     }
@@ -127,6 +183,25 @@ async def test_persisted_state_restored_after_restart(hass, severance, episode):
     assert coordinator._states[216].previous_episode == episode
     assert coordinator._states[216].show_status == "Running"
     assert coordinator._states[216].last_successful_update == "saved"
+    assert coordinator._states[216].consecutive_not_found == 2
+
+
+async def test_persisted_missing_state_recreates_repair(hass, severance, episode):
+    coordinator = make_coordinator(hass, [severance], [])
+    coordinator._store.async_load.return_value = {
+        "shows": {
+            "216": LastKnownState(
+                has_successful_value=True,
+                episode=episode,
+                consecutive_not_found=MISSING_SHOW_404_THRESHOLD,
+            ).as_dict()
+        }
+    }
+    with patch(
+        "custom_components.tv_show_monitor.coordinator.async_create_missing_show_issue"
+    ) as create_issue:
+        await coordinator._async_setup()
+    create_issue.assert_called_once_with(hass, "test", severance)
 
 
 async def test_removed_shows_are_pruned_from_persisted_storage(
