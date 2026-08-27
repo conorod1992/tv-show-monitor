@@ -140,6 +140,49 @@ async def test_successful_next_episode(episode):
     assert result == episode
 
 
+async def test_show_schedule_includes_status_and_previous_episode(episode):
+    previous = {
+        "id": 900,
+        "name": "Previous",
+        "season": 2,
+        "number": 3,
+        "type": "regular",
+        "airdate": "2026-10-05",
+        "airtime": "21:00",
+        "airstamp": "2026-10-05T21:00:00+00:00",
+        "runtime": 50,
+        "url": "https://tvmaze.test/episode/900",
+    }
+    payload = {
+        "id": 216,
+        "name": "Severance",
+        "status": "Running",
+        "_embedded": {
+            "nextepisode": {
+                "id": episode.episode_id,
+                "name": episode.name,
+                "season": episode.season,
+                "number": episode.number,
+                "type": episode.episode_type,
+                "airdate": episode.air_date,
+                "airtime": episode.air_time,
+                "airstamp": episode.air_stamp,
+                "runtime": episode.runtime,
+                "url": episode.url,
+            },
+            "previousepisode": previous,
+        },
+    }
+    result = await TVMazeClient(
+        FakeSession(FakeResponse(payload=payload))
+    ).async_get_show_schedule(216)
+    assert result.show_status == "Running"
+    assert result.next_episode == episode
+    assert result.previous_episode is not None
+    assert result.previous_episode.episode_id == 900
+    assert result.previous_episode.name == "Previous"
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -224,8 +267,8 @@ async def test_malformed_json():
     [
         [],
         {"_embedded": []},
-        {"_embedded": {"nextepisode": []}},
-        {"_embedded": {"nextepisode": {"id": 1}}},
+        {"id": 216, "name": "Severance", "_embedded": {"nextepisode": []}},
+        {"id": 216, "name": "Severance", "_embedded": {"nextepisode": {"id": 1}}},
     ],
 )
 async def test_unexpected_response_structure(payload):
