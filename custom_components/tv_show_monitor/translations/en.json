@@ -4,39 +4,19 @@
     "step": {
       "user": {
         "title": "Set up TV Show Monitor",
-        "description": "Enter one TV show per line. TVmaze's highest-ranked search result will be used for each title.",
+        "description": "Enter one TV show per line. Clear title matches are selected automatically; ambiguous TVmaze results are shown for you to choose.",
         "data": {
           "show_names": "TV show names"
         },
         "data_description": {
           "show_names": "One show per line, up to 50 shows. Blank lines and exact case-insensitive duplicates are ignored."
         }
-      }
-    },
-    "error": {
-      "no_shows": "Enter at least one TV show.",
-      "too_many_shows": "Enter no more than 50 TV shows.",
-      "show_not_found": "TVmaze could not find “{title}”. Check the title and try again.",
-      "duplicate_resolved_show": "“{title}” resolves to a TVmaze show already in this list.",
-      "already_configured_show": "One or more resolved TVmaze shows are already configured.",
-      "cannot_connect": "Could not connect to TVmaze while resolving “{title}”. Try again later."
-    },
-    "abort": {
-      "already_configured": "TV Show Monitor is already configured. Edit its options to change the show list."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "TV Show Monitor options",
-        "description": "Add, remove, or edit shows by replacing this list. Changing options reloads the integration.",
+      },
+      "select_show": {
+        "title": "Choose the right show",
+        "description": "TVmaze returned more than one plausible match for “{title}”. Choose the correct show.",
         "data": {
-          "show_names": "TV show names",
-          "poll_interval_hours": "Polling interval"
-        },
-        "data_description": {
-          "show_names": "One show per line. Existing titles keep their saved TVmaze match; only new or renamed titles are searched again.",
-          "poll_interval_hours": "Hours between checks. The minimum is 24 hours and values use 24-hour steps."
+          "candidate_id": "TVmaze match"
         }
       }
     },
@@ -47,6 +27,85 @@
       "duplicate_resolved_show": "“{title}” resolves to a TVmaze show already in this list.",
       "already_configured_show": "One or more resolved TVmaze shows are already configured.",
       "cannot_connect": "Could not connect to TVmaze while resolving “{title}”. Try again later.",
+      "invalid_selection": "That selection is no longer available. Try again."
+    },
+    "abort": {
+      "already_configured": "TV Show Monitor is already configured. Edit its options to change the show list."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TV Show Monitor options",
+        "description": "Following {show_count} shows. Current polling interval: {poll_interval} hours.",
+        "menu_options": {
+          "add_show": "Add show",
+          "remove_show": "Remove show",
+          "change_match": "Change TVmaze match",
+          "poll_interval": "Polling interval"
+        }
+      },
+      "add_show": {
+        "title": "Add show",
+        "description": "Search TVmaze for another show to follow.",
+        "data": {
+          "show_name": "Show title"
+        }
+      },
+      "add_select": {
+        "title": "Choose the right show",
+        "description": "TVmaze returned more than one plausible match for “{title}”. Choose the show to add.",
+        "data": {
+          "candidate_id": "TVmaze match"
+        }
+      },
+      "remove_show": {
+        "title": "Remove show",
+        "description": "Choose a show to stop following. Its TV Show Monitor entity and device will be removed when the integration reloads.",
+        "data": {
+          "show_id": "Show"
+        }
+      },
+      "change_match": {
+        "title": "Change TVmaze match",
+        "description": "Choose a configured show whose TVmaze match is wrong.",
+        "data": {
+          "show_id": "Show"
+        }
+      },
+      "change_match_search": {
+        "title": "Search for a different match",
+        "description": "Current match: {current_show}. Change the search title if useful, then continue.",
+        "data": {
+          "show_name": "Search title"
+        }
+      },
+      "change_match_select": {
+        "title": "Choose the replacement match",
+        "description": "Choose the correct TVmaze result for “{title}”.",
+        "data": {
+          "candidate_id": "TVmaze match"
+        }
+      },
+      "poll_interval": {
+        "title": "Polling interval",
+        "description": "Change how often TV Show Monitor checks TVmaze. This does not search or rematch any shows.",
+        "data": {
+          "poll_interval_hours": "Polling interval"
+        },
+        "data_description": {
+          "poll_interval_hours": "Hours between checks. The minimum is 24 hours and values use 24-hour steps."
+        }
+      }
+    },
+    "error": {
+      "no_shows": "Enter a TV show title.",
+      "too_many_shows": "You are already following the maximum of 50 shows.",
+      "show_not_found": "TVmaze could not find “{title}”. Check the title and try again.",
+      "duplicate_resolved_show": "That TVmaze show is already being followed.",
+      "cannot_connect": "Could not connect to TVmaze while resolving “{title}”. Try again later.",
+      "cannot_remove_last_show": "At least one show must remain configured.",
+      "invalid_selection": "That selection is no longer available. Try again.",
       "poll_interval_too_short": "The polling interval cannot be shorter than 24 hours.",
       "poll_interval_too_long": "The polling interval cannot be longer than 744 hours.",
       "poll_interval_invalid_step": "Use a polling interval in 24-hour steps."
