@@ -117,5 +117,11 @@
         "name": "Next Episode"
       }
     }
+  },
+  "issues": {
+    "show_missing": {
+      "title": "TVmaze can no longer find {show_name}",
+      "description": "TV Show Monitor has received at least three not-found responses for {show_name} (TVmaze ID {tvmaze_id}). The sensor has been marked unavailable so old schedule data is not presented as current. Open the integration's Configure menu and either use Change TVmaze match to select the show again or remove it if it should no longer be monitored. The existing last-good data is retained and the warning clears automatically if this TVmaze ID starts working again."
+    }
   }
 }
