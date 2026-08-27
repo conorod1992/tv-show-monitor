@@ -140,7 +140,7 @@ async def test_successful_next_episode(episode):
     assert result == episode
 
 
-async def test_show_schedule_includes_status_previous_episode_and_artwork(episode):
+async def test_show_schedule_includes_lifecycle_outlet_schedule_and_artwork(episode):
     previous = {
         "id": 900,
         "name": "Previous",
@@ -156,7 +156,11 @@ async def test_show_schedule_includes_status_previous_episode_and_artwork(episod
     payload = {
         "id": 216,
         "name": "Severance",
-        "status": "Running",
+        "status": "Ended",
+        "ended": "2026-10-12",
+        "network": {"name": "NBC"},
+        "webChannel": {"name": "Peacock"},
+        "schedule": {"days": ["Thursday"], "time": "22:00"},
         "image": {
             "medium": "https://static.tvmaze.test/severance-medium.jpg",
             "original": "https://static.tvmaze.test/severance-original.jpg",
@@ -180,12 +184,17 @@ async def test_show_schedule_includes_status_previous_episode_and_artwork(episod
     result = await TVMazeClient(
         FakeSession(FakeResponse(payload=payload))
     ).async_get_show_schedule(216)
-    assert result.show_status == "Running"
+    assert result.show_status == "Ended"
     assert result.next_episode == episode
     assert result.previous_episode is not None
     assert result.previous_episode.episode_id == 900
     assert result.previous_episode.name == "Previous"
     assert result.show_image_url == "https://static.tvmaze.test/severance-medium.jpg"
+    assert result.ended_date == "2026-10-12"
+    assert result.network_name == "NBC"
+    assert result.web_channel_name == "Peacock"
+    assert result.schedule_days == ("Thursday",)
+    assert result.schedule_time == "22:00"
 
 
 async def test_show_artwork_falls_back_to_original():
