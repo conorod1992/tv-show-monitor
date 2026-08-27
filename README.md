@@ -52,14 +52,18 @@ Each entity is naturally named from the canonical TVmaze title, for example
 `sensor.severance_next_episode`.
 
 - A scheduled episode: its local calendar date in ISO format, such as `2026-10-12`.
-- A successful check with no scheduled episode: `No next episode found`.
+- A `Running` show with no scheduled episode: `No next episode scheduled`.
+- An `Ended` show with no scheduled episode: `Ended`.
+- An `In Development` show with no scheduled episode: `In Development`.
+- A `To Be Determined` show with no scheduled episode: `To Be Determined`.
+- A successful check with no episode and no recognised lifecycle status: `No next episode found`.
 - No successful check yet: unavailable.
 
-The sensor state intentionally remains simple and stable. Richer programme and
-schedule information is exposed as attributes so existing automations do not need
-to change. When TVmaze provides show artwork, the sensor also uses the show's poster
-as its Home Assistant entity picture. The smaller TVmaze image is preferred to keep
-dashboard image loads lightweight, with the original image used only as a fallback.
+The sensor state intentionally remains simple and stable whenever an actual next
+episode exists. Richer programme and schedule information is exposed as attributes.
+When TVmaze provides show artwork, the sensor also uses the show's poster as its Home
+Assistant entity picture. The smaller TVmaze image is preferred to keep dashboard
+image loads lightweight, with the original image used only as a fallback.
 
 Template example:
 
@@ -69,19 +73,27 @@ Template example:
 
 ## Attributes
 
-When available, each sensor now exposes:
+When available, each sensor exposes:
 
 - TVmaze show ID and current show status;
+- ended date for ended shows;
+- current network and/or web channel;
+- TVmaze's normal schedule days and time;
 - next episode ID/name, season, episode number and `S02E04`-style code;
 - next air date/time, ISO air stamp, `next_airing`, runtime and episode URL;
 - `days_until`, calculated from Home Assistant's current local date;
 - previous episode ID/name, season, episode number/code and air date/time;
 - show URL and refresh diagnostics.
 
+For an ended show with no next episode, the previous episode is also exposed through
+`final_episode_*` attributes so dashboards and automations can identify the final
+known episode directly.
+
 A valid no-episode result includes `next_episode_found: false`. Every result reports
 the latest attempt and whether it succeeded; a failed attempt also exposes a short,
-safe `last_error`. Last-good show status, artwork, previous episode and next episode
-data are preserved through transient refresh failures and Home Assistant restarts.
+safe `last_error`. Last-good lifecycle metadata, artwork, previous episode and next
+episode data are preserved through transient refresh failures and Home Assistant
+restarts.
 
 ## Schedule change events
 
@@ -124,7 +136,7 @@ mode: single
 
 The default interval is 24 hours. The options flow accepts 24-hour steps from 24
 to 744 hours (for example 24, 48, 72, or 168). Standard Home Assistant entity
-updates request a coordinated refresh for all shows.
+updates request a coordinated refresh.
 
 Shows are fetched independently with a small concurrency limit to avoid request
 bursts while preventing one slow request from serialising the entire refresh.
@@ -132,9 +144,15 @@ Each show's single TVmaze request includes its main programme information plus t
 previous and next episode links when TVmaze has them. Transient timeouts, rate
 limits, and common server-side failures are retried once.
 
-A successful response with no future episode replaces any old episode with `No
-next episode found`. A failed API request or invalid response retains the last
-successful sensor value and its episode attributes, while recording failure
+Shows reported by TVmaze as `Ended` with no future episode are normally skipped once
+a successful ended-state result has been stored. They are rechecked every 30 days so
+a later TVmaze correction or revival can still be detected automatically. An ended
+show that still has a future episode continues to use the normal configured polling
+cadence.
+
+A successful response with no future episode replaces any old next episode with the
+appropriate lifecycle-aware state. A failed API request or invalid response retains
+the last successful sensor value and its episode attributes, while recording failure
 diagnostics. Last-good state is stored by Home Assistant and survives restarts.
 
 ## TVmaze attribution
@@ -145,6 +163,8 @@ TV Show Monitor is not affiliated with or endorsed by TVmaze.
 ## Known limitations
 
 - TVmaze only reports publicly scheduled future episodes.
+- TVmaze uses `Ended` for shows that have finished; the integration does not infer a
+  separate cancelled state when TVmaze does not provide one.
 - Show artwork is only available when TVmaze supplies an image for that show.
 - `days_until` is based on TVmaze's published air date rather than the viewer's
   personal streaming availability.
@@ -154,8 +174,8 @@ TV Show Monitor is not affiliated with or endorsed by TVmaze.
 
 - If the wrong show is matched, open **Configure → Change TVmaze match** and choose
   the correct search result.
-- If a sensor says `No next episode found`, TVmaze currently has no scheduled next
-  episode. This is not an error; `show_status` may provide additional context.
+- If a running sensor says `No next episode scheduled`, TVmaze currently has no
+  scheduled next episode for it.
 - If `last_attempt_successful` is false, check Home Assistant logs and wait for the
   next poll; the previous good value remains in place.
 - If a new sensor is unavailable, its first fetch failed and no persisted value
