@@ -22,6 +22,7 @@ PLATFORMS = ["sensor"]
 STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
 NO_NEXT_EPISODE = "No next episode found"
+EVENT_SCHEDULE_CHANGED = f"{DOMAIN}_schedule_changed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +86,15 @@ class EpisodeInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class ShowScheduleInfo:
+    """Current TVmaze schedule information for a show."""
+
+    show_status: str | None
+    next_episode: EpisodeInfo | None
+    previous_episode: EpisodeInfo | None
+
+
+@dataclass(frozen=True, slots=True)
 class LastKnownState:
     """Persisted last-known state and latest refresh diagnostics."""
 
@@ -94,17 +104,23 @@ class LastKnownState:
     last_update_attempt: str | None = None
     last_attempt_successful: bool | None = None
     last_error: str | None = None
+    show_status: str | None = None
+    previous_episode: EpisodeInfo | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a serialisable representation."""
         value = asdict(self)
         value["episode"] = self.episode.as_dict() if self.episode else None
+        value["previous_episode"] = (
+            self.previous_episode.as_dict() if self.previous_episode else None
+        )
         return value
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> LastKnownState:
         """Create state from storage."""
         episode = value.get("episode")
+        previous_episode = value.get("previous_episode")
         return cls(
             has_successful_value=bool(value.get("has_successful_value", False)),
             episode=EpisodeInfo.from_dict(episode)
@@ -114,6 +130,10 @@ class LastKnownState:
             last_update_attempt=_optional_str(value.get("last_update_attempt")),
             last_attempt_successful=value.get("last_attempt_successful"),
             last_error=_optional_str(value.get("last_error")),
+            show_status=_optional_str(value.get("show_status")),
+            previous_episode=EpisodeInfo.from_dict(previous_episode)
+            if isinstance(previous_episode, dict)
+            else None,
         )
 
 
