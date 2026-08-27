@@ -35,7 +35,7 @@
           "poll_interval_hours": "Polling interval"
         },
         "data_description": {
-          "show_names": "One show per line. Every title is resolved again against TVmaze.",
+          "show_names": "One show per line. Existing titles keep their saved TVmaze match; only new or renamed titles are searched again.",
           "poll_interval_hours": "Hours between checks. The minimum is 24 hours and values use 24-hour steps."
         }
       }
