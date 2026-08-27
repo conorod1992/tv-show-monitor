@@ -24,6 +24,13 @@ async def async_get_config_entry_diagnostics(
             {
                 "canonical_name": result.show.canonical_name,
                 "tvmaze_id": result.show.tvmaze_id,
+                "show_status": result.state.show_status,
+                "next_episode_id": result.state.episode.episode_id
+                if result.state.episode
+                else None,
+                "previous_episode_id": result.state.previous_episode.episode_id
+                if result.state.previous_episode
+                else None,
                 "has_persisted_successful_value": result.state.has_successful_value,
                 "last_successful_update": result.state.last_successful_update,
                 "last_update_attempt": result.state.last_update_attempt,

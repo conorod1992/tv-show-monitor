@@ -55,9 +55,9 @@ Each entity is naturally named from the canonical TVmaze title, for example
 - A successful check with no scheduled episode: `No next episode found`.
 - No successful check yet: unavailable.
 
-TVmaze may not have a date until an episode has been publicly scheduled. The
-integration does not infer whether a programme is cancelled, ended, on hiatus, or
-awaiting renewal.
+The sensor state intentionally remains simple and stable. Richer programme and
+schedule information is exposed as attributes so existing automations do not need
+to change.
 
 Template example:
 
@@ -67,12 +67,56 @@ Template example:
 
 ## Attributes
 
-Scheduled episodes include the TVmaze show ID, episode ID and name, season,
-episode number, `S02E04`-style episode code where possible, type, air date/time,
-air stamp, runtime, episode URL, show URL, and refresh timestamps. A valid
-no-episode result includes `next_episode_found: false`. Every result reports the
-latest attempt and whether it succeeded; a failed attempt also exposes a short,
-safe `last_error`.
+When available, each sensor now exposes:
+
+- TVmaze show ID and current show status;
+- next episode ID/name, season, episode number and `S02E04`-style code;
+- next air date/time, ISO air stamp, `next_airing`, runtime and episode URL;
+- `days_until`, calculated from Home Assistant's current local date;
+- previous episode ID/name, season, episode number/code and air date/time;
+- show URL and refresh diagnostics.
+
+A valid no-episode result includes `next_episode_found: false`. Every result reports
+the latest attempt and whether it succeeded; a failed attempt also exposes a short,
+safe `last_error`. Last-good show status, previous episode and next episode data are
+preserved through transient refresh failures and Home Assistant restarts.
+
+## Schedule change events
+
+After the integration has established a successful baseline, meaningful changes to
+the next-episode schedule fire a `tv_show_monitor_schedule_changed` Home Assistant
+event. Initial setup does not emit an event simply because a show already has an
+upcoming episode.
+
+`change_type` is one of:
+
+- `scheduled` — a show with no known next episode gains one;
+- `schedule_cleared` — a previously scheduled next episode disappears;
+- `next_episode_changed` — TVmaze now identifies a different episode as next;
+- `rescheduled` — the same episode ID has a different air date or air stamp.
+
+Event data includes `tvmaze_show_id`, `show_name`, old/new episode IDs, old/new air
+dates and old/new air stamps. This makes schedule-driven automations reliable
+without having to infer the kind of change from sensor state transitions.
+
+Example event trigger:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: tv_show_monitor_schedule_changed
+    event_data:
+      tvmaze_show_id: 216
+conditions: []
+actions:
+  - action: notify.notify
+    data:
+      title: TV schedule changed
+      message: >-
+        {{ trigger.event.data.show_name }}:
+        {{ trigger.event.data.change_type }}
+mode: single
+```
 
 ## Polling and error preservation
 
@@ -82,37 +126,14 @@ updates request a coordinated refresh for all shows.
 
 Shows are fetched independently with a small concurrency limit to avoid request
 bursts while preventing one slow request from serialising the entire refresh.
-Transient timeouts, rate limits, and common server-side failures are retried once.
+Each show's single TVmaze request includes its main programme information plus the
+previous and next episode links when TVmaze has them. Transient timeouts, rate
+limits, and common server-side failures are retried once.
+
 A successful response with no future episode replaces any old episode with `No
 next episode found`. A failed API request or invalid response retains the last
 successful sensor value and its episode attributes, while recording failure
 diagnostics. Last-good state is stored by Home Assistant and survives restarts.
-
-## Example automation
-
-Paste this into an automation's **Edit in YAML** screen and replace the notification
-service if needed:
-
-```yaml
-alias: Severance episode scheduled
-description: Notify when TVmaze publishes the next Severance date
-triggers:
-  - trigger: state
-    entity_id: sensor.severance_next_episode
-    from: "No next episode found"
-conditions:
-  - condition: template
-    value_template: >-
-      {{ trigger.to_state.state is match('^\\d{4}-\\d{2}-\\d{2}$') }}
-actions:
-  - action: notify.notify
-    data:
-      title: Severance episode scheduled
-      message: >-
-        The next episode is on {{ trigger.to_state.state }}:
-        {{ trigger.to_state.attributes.episode_name }}
-mode: single
-```
 
 ## TVmaze attribution
 
@@ -122,6 +143,8 @@ TV Show Monitor is not affiliated with or endorsed by TVmaze.
 ## Known limitations
 
 - TVmaze only reports publicly scheduled future episodes.
+- `days_until` is based on TVmaze's published air date rather than the viewer's
+  personal streaming availability.
 - Polling intervals use whole 24-hour steps and cannot be shorter than one day.
 
 ## Troubleshooting
@@ -129,7 +152,7 @@ TV Show Monitor is not affiliated with or endorsed by TVmaze.
 - If the wrong show is matched, open **Configure → Change TVmaze match** and choose
   the correct search result.
 - If a sensor says `No next episode found`, TVmaze currently has no scheduled next
-  episode. This is not an error.
+  episode. This is not an error; `show_status` may provide additional context.
 - If `last_attempt_successful` is false, check Home Assistant logs and wait for the
   next poll; the previous good value remains in place.
 - If a new sensor is unavailable, its first fetch failed and no persisted value

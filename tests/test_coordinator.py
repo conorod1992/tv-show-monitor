@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.tv_show_monitor.api import TVMazeError
-from custom_components.tv_show_monitor.const import ConfiguredShow, LastKnownState
+from custom_components.tv_show_monitor.const import (
+    EVENT_SCHEDULE_CHANGED,
+    ConfiguredShow,
+    LastKnownState,
+    ShowScheduleInfo,
+)
 from custom_components.tv_show_monitor.coordinator import (
     MAX_CONCURRENT_REQUESTS,
     TVShowMonitorCoordinator,
@@ -15,7 +21,20 @@ from custom_components.tv_show_monitor.coordinator import (
 
 def make_coordinator(hass, shows, effects):
     client = AsyncMock()
-    client.async_get_next_episode.side_effect = effects
+    if callable(effects):
+
+        async def schedule_effect(show_id):
+            value = await effects(show_id)
+            return ShowScheduleInfo("Running", value, None)
+
+        client.async_get_show_schedule.side_effect = schedule_effect
+    else:
+        client.async_get_show_schedule.side_effect = [
+            effect
+            if isinstance(effect, BaseException)
+            else ShowScheduleInfo("Running", effect, None)
+            for effect in effects
+        ]
     entry = MagicMock(entry_id="test")
     coordinator = TVShowMonitorCoordinator(hass, client, tuple(shows), 24, entry)
     coordinator._store = AsyncMock()
@@ -27,6 +46,7 @@ async def test_all_shows_update_successfully(hass, severance, episode):
     coordinator = make_coordinator(hass, [severance, other], [episode, None])
     data = await coordinator._async_update_data()
     assert data[216].state.episode == episode
+    assert data[216].state.show_status == "Running"
     assert data[2].state.has_successful_value
     assert data[2].state.episode is None
 
@@ -48,9 +68,13 @@ async def test_failed_show_retains_previous_episode(hass, severance, episode):
         episode=episode,
         last_successful_update="old",
         last_attempt_successful=True,
+        show_status="Running",
+        previous_episode=episode,
     )
     data = await coordinator._async_update_data()
     assert data[216].state.episode == episode
+    assert data[216].state.previous_episode == episode
+    assert data[216].state.show_status == "Running"
     assert data[216].state.last_successful_update == "old"
     assert data[216].state.last_attempt_successful is False
     assert data[216].state.last_error == "timeout"
@@ -93,11 +117,15 @@ async def test_persisted_state_restored_after_restart(hass, severance, episode):
                 has_successful_value=True,
                 episode=episode,
                 last_successful_update="saved",
+                show_status="Running",
+                previous_episode=episode,
             ).as_dict()
         }
     }
     await coordinator._async_setup()
     assert coordinator._states[216].episode == episode
+    assert coordinator._states[216].previous_episode == episode
+    assert coordinator._states[216].show_status == "Running"
     assert coordinator._states[216].last_successful_update == "saved"
 
 
@@ -121,6 +149,48 @@ async def test_storage_load_failure_does_not_overwrite_cache(hass, severance):
     coordinator._store.async_load.side_effect = OSError("read failed")
     await coordinator._async_setup()
     coordinator._store.async_save.assert_not_awaited()
+
+
+async def test_initial_success_does_not_emit_schedule_event(hass, severance, episode):
+    coordinator = make_coordinator(hass, [severance], [episode])
+    events = []
+    hass.bus.async_listen(EVENT_SCHEDULE_CHANGED, events.append)
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+    assert events == []
+
+
+async def test_newly_scheduled_episode_emits_event(hass, severance, episode):
+    coordinator = make_coordinator(hass, [severance], [episode])
+    coordinator._states[216] = LastKnownState(has_successful_value=True, episode=None)
+    events = []
+    hass.bus.async_listen(EVENT_SCHEDULE_CHANGED, events.append)
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+    assert len(events) == 1
+    assert events[0].data["change_type"] == "scheduled"
+    assert events[0].data["tvmaze_show_id"] == 216
+    assert events[0].data["new_episode_id"] == episode.episode_id
+
+
+async def test_rescheduled_episode_emits_event(hass, severance, episode):
+    moved = replace(
+        episode,
+        air_date="2026-10-13",
+        air_stamp="2026-10-13T21:00:00+00:00",
+    )
+    coordinator = make_coordinator(hass, [severance], [moved])
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True, episode=episode
+    )
+    events = []
+    hass.bus.async_listen(EVENT_SCHEDULE_CHANGED, events.append)
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+    assert len(events) == 1
+    assert events[0].data["change_type"] == "rescheduled"
+    assert events[0].data["old_air_date"] == episode.air_date
+    assert events[0].data["new_air_date"] == moved.air_date
 
 
 async def test_refresh_concurrency_is_bounded(hass, episode):
@@ -165,5 +235,5 @@ async def test_concurrent_refreshes_are_deduplicated(hass, severance, episode):
     second = asyncio.create_task(coordinator.async_request_refresh())
     release.set()
     await asyncio.gather(first, second)
-    assert coordinator.client.async_get_next_episode.await_count == 1
+    assert coordinator.client.async_get_show_schedule.await_count == 1
     await coordinator.async_shutdown()

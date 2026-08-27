@@ -10,7 +10,13 @@ from typing import Any
 
 from aiohttp import ClientError, ClientResponse, ClientSession
 
-from .const import API_BASE_URL, USER_AGENT, ConfiguredShow, EpisodeInfo
+from .const import (
+    API_BASE_URL,
+    USER_AGENT,
+    ConfiguredShow,
+    EpisodeInfo,
+    ShowScheduleInfo,
+)
 
 _LOGGER = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 15
@@ -114,49 +120,34 @@ class TVMazeClient:
         candidates = await self.async_search_shows(query)
         return candidates[0].as_configured_show(query) if candidates else None
 
-    async def async_get_next_episode(self, tvmaze_id: int) -> EpisodeInfo | None:
-        """Return the next episode, or None after a valid no-episode response."""
+    async def async_get_show_schedule(self, tvmaze_id: int) -> ShowScheduleInfo:
+        """Return show status plus the previous and next scheduled episodes."""
         payload = await self._async_get(
-            f"/shows/{tvmaze_id}", params={"embed": "nextepisode"}
+            f"/shows/{tvmaze_id}",
+            params={"embed[]": ["nextepisode", "previousepisode"]},
         )
         if not isinstance(payload, dict):
             raise TVMazeResponseError("Unexpected show response")
         if payload.get("id") != tvmaze_id or not isinstance(payload.get("name"), str):
             raise TVMazeResponseError("Show response is missing required data")
+
         embedded = payload.get("_embedded")
         if embedded is None:
-            return None
+            embedded = {}
         if not isinstance(embedded, dict):
             raise TVMazeResponseError("Invalid embedded episode data")
-        episode = embedded.get("nextepisode")
-        if episode is None:
-            return None
-        if not isinstance(episode, dict):
-            raise TVMazeResponseError("Invalid next-episode data")
-        episode_id = episode.get("id")
-        name = episode.get("name")
-        air_date = episode.get("airdate")
-        if (
-            not isinstance(episode_id, int)
-            or not isinstance(name, str)
-            or not isinstance(air_date, str)
-            or not air_date
-        ):
-            raise TVMazeResponseError("Next episode is missing required data")
-        return EpisodeInfo(
-            episode_id=episode_id,
-            name=name,
-            season=_optional_int(episode, "season"),
-            number=_optional_int(episode, "number"),
-            episode_type=_optional_str(episode, "type"),
-            air_date=air_date,
-            air_time=_optional_str(episode, "airtime"),
-            air_stamp=_optional_str(episode, "airstamp"),
-            runtime=_optional_int(episode, "runtime"),
-            url=_optional_str(episode, "url"),
+
+        return ShowScheduleInfo(
+            show_status=_optional_str_loose(payload.get("status")),
+            next_episode=_parse_episode(embedded.get("nextepisode")),
+            previous_episode=_parse_episode(embedded.get("previousepisode")),
         )
 
-    async def _async_get(self, path: str, *, params: dict[str, str]) -> Any:
+    async def async_get_next_episode(self, tvmaze_id: int) -> EpisodeInfo | None:
+        """Return the next episode, retained for callers that only need that value."""
+        return (await self.async_get_show_schedule(tvmaze_id)).next_episode
+
+    async def _async_get(self, path: str, *, params: dict[str, str | list[str]]) -> Any:
         for attempt in range(MAX_RETRIES + 1):
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
@@ -209,6 +200,35 @@ class TVMazeClient:
         raise TVMazeRateLimitError("TVmaze rate limit exceeded")
 
 
+def _parse_episode(value: Any) -> EpisodeInfo | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TVMazeResponseError("Invalid episode data")
+    episode_id = value.get("id")
+    name = value.get("name")
+    air_date = value.get("airdate")
+    if (
+        not isinstance(episode_id, int)
+        or not isinstance(name, str)
+        or not isinstance(air_date, str)
+        or not air_date
+    ):
+        raise TVMazeResponseError("Episode is missing required data")
+    return EpisodeInfo(
+        episode_id=episode_id,
+        name=name,
+        season=_optional_int(value, "season"),
+        number=_optional_int(value, "number"),
+        episode_type=_optional_str(value, "type"),
+        air_date=air_date,
+        air_time=_optional_str(value, "airtime"),
+        air_stamp=_optional_str(value, "airstamp"),
+        runtime=_optional_int(value, "runtime"),
+        url=_optional_str(value, "url"),
+    )
+
+
 def _retry_delay(response: ClientResponse) -> float:
     value = response.headers.get("Retry-After")
     if not value:
@@ -258,7 +278,7 @@ def _optional_int(data: dict[str, Any], key: str) -> int | None:
     if value is None:
         return None
     if not isinstance(value, int):
-        raise TVMazeResponseError(f"Next episode contains invalid {key}")
+        raise TVMazeResponseError(f"Episode contains invalid {key}")
     return value
 
 
@@ -267,5 +287,5 @@ def _optional_str(data: dict[str, Any], key: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise TVMazeResponseError(f"Next episode contains invalid {key}")
+        raise TVMazeResponseError(f"Episode contains invalid {key}")
     return value

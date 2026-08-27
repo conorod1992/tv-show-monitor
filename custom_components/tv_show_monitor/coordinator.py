@@ -15,9 +15,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .api import TVMazeClient, TVMazeError
 from .const import (
     DOMAIN,
+    EVENT_SCHEDULE_CHANGED,
     STORAGE_KEY_PREFIX,
     STORAGE_VERSION,
     ConfiguredShow,
+    EpisodeInfo,
     LastKnownState,
     ShowUpdateResult,
     utc_now_iso,
@@ -97,7 +99,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             attempt = utc_now_iso()
             previous = self._states.get(show.tvmaze_id, LastKnownState())
             try:
-                episode = await self.client.async_get_next_episode(show.tvmaze_id)
+                schedule = await self.client.async_get_show_schedule(show.tvmaze_id)
             except TVMazeError as err:
                 error = _safe_error(err)
                 _LOGGER.warning(
@@ -134,12 +136,28 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     last_error="Unexpected refresh error",
                 )
             else:
+                if previous.has_successful_value:
+                    change_type = _schedule_change_type(
+                        previous.episode, schedule.next_episode
+                    )
+                    if change_type is not None:
+                        self.hass.bus.async_fire(
+                            EVENT_SCHEDULE_CHANGED,
+                            _schedule_event_data(
+                                show,
+                                change_type,
+                                previous.episode,
+                                schedule.next_episode,
+                            ),
+                        )
                 self._states[show.tvmaze_id] = LastKnownState(
                     has_successful_value=True,
-                    episode=episode,
+                    episode=schedule.next_episode,
                     last_successful_update=attempt,
                     last_update_attempt=attempt,
                     last_attempt_successful=True,
+                    show_status=schedule.show_status,
+                    previous_episode=schedule.previous_episode,
                 )
 
     async def _async_save(self) -> None:
@@ -154,6 +172,41 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             )
         except Exception as err:  # Storage backends can raise implementation errors.
             _LOGGER.error("Unable to persist TV Show Monitor state: %s", err)
+
+
+def _schedule_change_type(
+    old: EpisodeInfo | None, new: EpisodeInfo | None
+) -> str | None:
+    if old is None and new is None:
+        return None
+    if old is None:
+        return "scheduled"
+    if new is None:
+        return "schedule_cleared"
+    if old.episode_id != new.episode_id:
+        return "next_episode_changed"
+    if old.air_date != new.air_date or old.air_stamp != new.air_stamp:
+        return "rescheduled"
+    return None
+
+
+def _schedule_event_data(
+    show: ConfiguredShow,
+    change_type: str,
+    old: EpisodeInfo | None,
+    new: EpisodeInfo | None,
+) -> dict[str, object]:
+    return {
+        "tvmaze_show_id": show.tvmaze_id,
+        "show_name": show.canonical_name,
+        "change_type": change_type,
+        "old_episode_id": old.episode_id if old else None,
+        "new_episode_id": new.episode_id if new else None,
+        "old_air_date": old.air_date if old else None,
+        "new_air_date": new.air_date if new else None,
+        "old_air_stamp": old.air_stamp if old else None,
+        "new_air_stamp": new.air_stamp if new else None,
+    }
 
 
 def _safe_error(err: Exception) -> str:
