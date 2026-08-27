@@ -163,7 +163,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     last_error="Unexpected refresh error",
                 )
             else:
-                async_delete_missing_show_issue(self.hass, self._entry_id, show.tvmaze_id)
+                async_delete_missing_show_issue(
+                    self.hass, self._entry_id, show.tvmaze_id
+                )
                 if previous.has_successful_value:
                     change_type = _schedule_change_type(
                         previous.episode, schedule.next_episode
