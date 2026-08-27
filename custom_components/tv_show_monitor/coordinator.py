@@ -12,10 +12,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .api import TVMazeClient, TVMazeError
+from .api import TVMazeClient, TVMazeError, TVMazeNotFoundError
 from .const import (
     DOMAIN,
     EVENT_SCHEDULE_CHANGED,
+    MISSING_SHOW_404_THRESHOLD,
     STORAGE_KEY_PREFIX,
     STORAGE_VERSION,
     ConfiguredShow,
@@ -24,6 +25,7 @@ from .const import (
     ShowUpdateResult,
     utc_now_iso,
 )
+from .repairs import async_create_missing_show_issue, async_delete_missing_show_issue
 
 _LOGGER = logging.getLogger(__name__)
 MAX_CONCURRENT_REQUESTS = 5
@@ -50,6 +52,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         )
         self.client = client
         self.shows = shows
+        self._entry_id = config_entry.entry_id
         self._states: dict[int, LastKnownState] = {}
         self._store: Store[dict[str, object]] = Store(
             hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}.{config_entry.entry_id}"
@@ -69,12 +72,18 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                 raw = raw_states.get(str(show.tvmaze_id))
                 if isinstance(raw, dict):
                     try:
-                        self._states[show.tvmaze_id] = LastKnownState.from_dict(raw)
+                        state = LastKnownState.from_dict(raw)
                     except KeyError, TypeError, ValueError:
                         _LOGGER.warning(
                             "Ignoring invalid persisted state for TVmaze show ID %s",
                             show.tvmaze_id,
                         )
+                    else:
+                        self._states[show.tvmaze_id] = state
+                        if state.consecutive_not_found >= MISSING_SHOW_404_THRESHOLD:
+                            async_create_missing_show_issue(
+                                self.hass, self._entry_id, show
+                            )
         await self._async_save()
 
     async def _async_update_data(self) -> dict[int, ShowUpdateResult]:
@@ -100,6 +109,24 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             previous = self._states.get(show.tvmaze_id, LastKnownState())
             try:
                 schedule = await self.client.async_get_show_schedule(show.tvmaze_id)
+            except TVMazeNotFoundError as err:
+                error = _safe_error(err)
+                not_found_count = previous.consecutive_not_found + 1
+                _LOGGER.warning(
+                    "TVmaze show ID %s was not found (%s/%s)",
+                    show.tvmaze_id,
+                    not_found_count,
+                    MISSING_SHOW_404_THRESHOLD,
+                )
+                self._states[show.tvmaze_id] = replace(
+                    previous,
+                    last_update_attempt=attempt,
+                    last_attempt_successful=False,
+                    last_error=error,
+                    consecutive_not_found=not_found_count,
+                )
+                if not_found_count >= MISSING_SHOW_404_THRESHOLD:
+                    async_create_missing_show_issue(self.hass, self._entry_id, show)
             except TVMazeError as err:
                 error = _safe_error(err)
                 _LOGGER.warning(
@@ -136,6 +163,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     last_error="Unexpected refresh error",
                 )
             else:
+                async_delete_missing_show_issue(self.hass, self._entry_id, show.tvmaze_id)
                 if previous.has_successful_value:
                     change_type = _schedule_change_type(
                         previous.episode, schedule.next_episode
@@ -159,6 +187,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     show_status=schedule.show_status,
                     previous_episode=schedule.previous_episode,
                     show_image_url=schedule.show_image_url,
+                    consecutive_not_found=0,
                 )
 
     async def _async_save(self) -> None:
