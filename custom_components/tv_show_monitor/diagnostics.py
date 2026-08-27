@@ -7,7 +7,12 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import TVShowMonitorConfigEntry
-from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_HOURS, VERSION
+from .const import (
+    CONF_POLL_INTERVAL,
+    DEFAULT_POLL_INTERVAL_HOURS,
+    MISSING_SHOW_404_THRESHOLD,
+    VERSION,
+)
 
 
 async def async_get_config_entry_diagnostics(
@@ -32,6 +37,10 @@ async def async_get_config_entry_diagnostics(
                 if result.state.previous_episode
                 else None,
                 "has_persisted_successful_value": result.state.has_successful_value,
+                "consecutive_not_found": result.state.consecutive_not_found,
+                "missing_from_tvmaze": (
+                    result.state.consecutive_not_found >= MISSING_SHOW_404_THRESHOLD
+                ),
                 "last_successful_update": result.state.last_successful_update,
                 "last_update_attempt": result.state.last_update_attempt,
                 "last_attempt_successful": result.state.last_attempt_successful,
