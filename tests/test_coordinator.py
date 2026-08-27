@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.tv_show_monitor.api import TVMazeError
 from custom_components.tv_show_monitor.const import ConfiguredShow, LastKnownState
-from custom_components.tv_show_monitor.coordinator import TVShowMonitorCoordinator
+from custom_components.tv_show_monitor.coordinator import (
+    MAX_CONCURRENT_REQUESTS,
+    TVShowMonitorCoordinator,
+)
 
 
 def make_coordinator(hass, shows, effects):
@@ -111,6 +114,39 @@ async def test_removed_shows_are_pruned_from_persisted_storage(
     await coordinator._async_setup()
     saved = coordinator._store.async_save.call_args.args[0]
     assert set(saved["shows"]) == {"216"}
+
+
+async def test_storage_load_failure_does_not_overwrite_cache(hass, severance):
+    coordinator = make_coordinator(hass, [severance], [])
+    coordinator._store.async_load.side_effect = OSError("read failed")
+    await coordinator._async_setup()
+    coordinator._store.async_save.assert_not_awaited()
+
+
+async def test_refresh_concurrency_is_bounded(hass, episode):
+    shows = tuple(
+        ConfiguredShow(index, f"Show {index}", f"Show {index}")
+        for index in range(1, MAX_CONCURRENT_REQUESTS * 2 + 2)
+    )
+    current = 0
+    max_seen = 0
+    release = asyncio.Event()
+
+    async def delayed(_show_id):
+        nonlocal current, max_seen
+        current += 1
+        max_seen = max(max_seen, current)
+        if current == MAX_CONCURRENT_REQUESTS:
+            release.set()
+        await release.wait()
+        await asyncio.sleep(0)
+        current -= 1
+        return episode
+
+    coordinator = make_coordinator(hass, shows, delayed)
+    data = await coordinator._async_update_data()
+    assert len(data) == len(shows)
+    assert max_seen == MAX_CONCURRENT_REQUESTS
 
 
 async def test_concurrent_refreshes_are_deduplicated(hass, severance, episode):
