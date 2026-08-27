@@ -147,9 +147,7 @@ class TVMazeClient:
         """Return the next episode, retained for callers that only need that value."""
         return (await self.async_get_show_schedule(tvmaze_id)).next_episode
 
-    async def _async_get(
-        self, path: str, *, params: dict[str, str | list[str]]
-    ) -> Any:
+    async def _async_get(self, path: str, *, params: dict[str, str | list[str]]) -> Any:
         for attempt in range(MAX_RETRIES + 1):
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
