@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import TVShowMonitorConfigEntry
-from .const import NO_NEXT_EPISODE, EpisodeInfo
+from .const import MISSING_SHOW_404_THRESHOLD, NO_NEXT_EPISODE, EpisodeInfo
 from .entity import TVShowMonitorEntity
 
 
@@ -33,8 +33,12 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Remain available through failures if a last-good value exists."""
-        return self.result.state.has_successful_value
+        """Retain transient failures but hide persistently missing TVmaze shows."""
+        state = self.result.state
+        return (
+            state.has_successful_value
+            and state.consecutive_not_found < MISSING_SHOW_404_THRESHOLD
+        )
 
     @property
     def native_value(self) -> str | None:
@@ -62,6 +66,10 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
             "last_successful_update": state.last_successful_update,
             "last_update_attempt": state.last_update_attempt,
             "last_attempt_successful": state.last_attempt_successful,
+            "consecutive_not_found": state.consecutive_not_found,
+            "missing_from_tvmaze": (
+                state.consecutive_not_found >= MISSING_SHOW_404_THRESHOLD
+            ),
         }
         episode = state.episode
         if state.has_successful_value and episode is None:
