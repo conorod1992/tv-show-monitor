@@ -74,9 +74,11 @@ The default interval is 24 hours. The options flow accepts 24-hour steps from 24
 to 744 hours (for example 24, 48, 72, or 168). Standard Home Assistant entity
 updates request a coordinated refresh for all shows.
 
-Shows are fetched independently and sequentially to avoid request bursts. A
-successful response with no future episode replaces any old episode with `No next
-episode found`. A failed API request or invalid response retains the last
+Shows are fetched independently with a small concurrency limit to avoid request
+bursts while preventing one slow request from serialising the entire refresh.
+Transient timeouts, rate limits, and common server-side failures are retried once.
+A successful response with no future episode replaces any old episode with `No
+next episode found`. A failed API request or invalid response retains the last
 successful sensor value and its episode attributes, while recording failure
 diagnostics. Last-good state is stored by Home Assistant and survives restarts.
 
