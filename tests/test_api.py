@@ -146,7 +146,9 @@ async def test_transient_http_error_retries_then_succeeds():
 
 
 async def test_transient_http_error_retries_once_then_raises():
-    client = TVMazeClient(FakeSession(FakeResponse(status=500), FakeResponse(status=500)))
+    client = TVMazeClient(
+        FakeSession(FakeResponse(status=500), FakeResponse(status=500))
+    )
     with (
         patch("custom_components.tv_show_monitor.api.asyncio.sleep"),
         pytest.raises(TVMazeError, match="HTTP 500"),
