@@ -20,6 +20,7 @@ from .const import (
     ConfiguredShow,
 )
 from .coordinator import TVShowMonitorCoordinator
+from .repairs import async_delete_missing_show_issue
 
 
 @dataclass(slots=True)
@@ -64,7 +65,7 @@ async def _async_remove_obsolete_registry_entries(
     entry: TVShowMonitorConfigEntry,
     shows: tuple[ConfiguredShow, ...],
 ) -> None:
-    """Remove entities/devices for shows deliberately deleted in options."""
+    """Remove entities/devices and repair issues for deliberately deleted shows."""
     active_ids = {str(show.tvmaze_id) for show in shows}
     entity_registry = er.async_get(hass)
     device_registry = dr.async_get(hass)
@@ -79,6 +80,12 @@ async def _async_remove_obsolete_registry_entries(
         if tvmaze_id not in active_ids:
             device_id = entity_entry.device_id
             entity_registry.async_remove(entity_entry.entity_id)
+            try:
+                missing_show_id = int(tvmaze_id)
+            except ValueError:
+                pass
+            else:
+                async_delete_missing_show_issue(hass, entry.entry_id, missing_show_id)
             if device_id and not er.async_entries_for_device(
                 entity_registry, device_id, include_disabled_entities=True
             ):
