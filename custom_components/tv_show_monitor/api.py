@@ -121,7 +121,7 @@ class TVMazeClient:
         return candidates[0].as_configured_show(query) if candidates else None
 
     async def async_get_show_schedule(self, tvmaze_id: int) -> ShowScheduleInfo:
-        """Return show status, artwork and previous/next scheduled episodes."""
+        """Return show lifecycle, outlet, artwork and episode schedule information."""
         payload = await self._async_get(
             f"/shows/{tvmaze_id}",
             params={"embed[]": ["nextepisode", "previousepisode"]},
@@ -137,11 +137,17 @@ class TVMazeClient:
         if not isinstance(embedded, dict):
             raise TVMazeResponseError("Invalid embedded episode data")
 
+        schedule_days, schedule_time = _show_schedule(payload)
         return ShowScheduleInfo(
             show_status=_optional_str_loose(payload.get("status")),
             next_episode=_parse_episode(embedded.get("nextepisode")),
             previous_episode=_parse_episode(embedded.get("previousepisode")),
             show_image_url=_show_image_url(payload),
+            ended_date=_optional_str_loose(payload.get("ended")),
+            network_name=_show_channel_name(payload, "network"),
+            web_channel_name=_show_channel_name(payload, "webChannel"),
+            schedule_days=schedule_days,
+            schedule_time=schedule_time,
         )
 
     async def async_get_next_episode(self, tvmaze_id: int) -> EpisodeInfo | None:
@@ -249,12 +255,17 @@ def _retry_delay(response: ClientResponse) -> float:
 
 def _show_network_name(show: dict[str, Any]) -> str | None:
     for key in ("network", "webChannel"):
-        value = show.get(key)
-        if isinstance(value, dict):
-            name = value.get("name")
-            if isinstance(name, str):
-                return name
+        name = _show_channel_name(show, key)
+        if name:
+            return name
     return None
+
+
+def _show_channel_name(show: dict[str, Any], key: str) -> str | None:
+    value = show.get(key)
+    if not isinstance(value, dict):
+        return None
+    return _optional_str_loose(value.get("name"))
 
 
 def _show_country_name(show: dict[str, Any]) -> str | None:
@@ -268,6 +279,19 @@ def _show_country_name(show: dict[str, Any]) -> str | None:
             if isinstance(name, str):
                 return name
     return None
+
+
+def _show_schedule(show: dict[str, Any]) -> tuple[tuple[str, ...], str | None]:
+    schedule = show.get("schedule")
+    if not isinstance(schedule, dict):
+        return (), None
+    days = schedule.get("days")
+    schedule_days = (
+        tuple(day for day in days if isinstance(day, str))
+        if isinstance(days, list)
+        else ()
+    )
+    return schedule_days, _optional_str_loose(schedule.get("time"))
 
 
 def _show_image_url(show: dict[str, Any]) -> str | None:
