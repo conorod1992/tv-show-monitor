@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from custom_components.tv_show_monitor.const import (
     DOMAIN,
     MISSING_SHOW_404_THRESHOLD,
@@ -33,6 +35,9 @@ def test_date_state_stable_identity_attributes_device_and_artwork(severance, epi
             show_status="Running",
             previous_episode=episode,
             show_image_url="https://static.tvmaze.test/severance-medium.jpg",
+            network_name="Apple TV+",
+            schedule_days=("Friday",),
+            schedule_time="09:00",
         ),
     )
     with patch(
@@ -46,6 +51,9 @@ def test_date_state_stable_identity_attributes_device_and_artwork(severance, epi
     assert attributes["episode_code"] == "S02E04"
     assert attributes["episode_name"] == episode.name
     assert attributes["show_status"] == "Running"
+    assert attributes["network"] == "Apple TV+"
+    assert attributes["schedule_days"] == ["Friday"]
+    assert attributes["schedule_time"] == "09:00"
     assert attributes["days_until"] == 2
     assert attributes["next_airing"] == episode.air_stamp
     assert attributes["previous_episode_name"] == episode.name
@@ -56,14 +64,55 @@ def test_date_state_stable_identity_attributes_device_and_artwork(severance, epi
     assert sensor.device_info["manufacturer"] == "TVmaze"
 
 
-def test_no_next_episode_state(severance):
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("Running", "No next episode scheduled"),
+        ("Ended", "Ended"),
+        ("In Development", "In Development"),
+        ("To Be Determined", "To Be Determined"),
+        (None, "No next episode found"),
+    ],
+)
+def test_no_next_episode_state_reflects_show_status(severance, status, expected):
     sensor = make_sensor(
-        severance, LastKnownState(True, None, "saved", "attempt", True)
+        severance,
+        LastKnownState(
+            True,
+            None,
+            "saved",
+            "attempt",
+            True,
+            show_status=status,
+        ),
     )
     assert sensor.available
-    assert sensor.native_value == "No next episode found"
-    assert sensor.entity_picture is None
+    assert sensor.native_value == expected
     assert sensor.extra_state_attributes["next_episode_found"] is False
+
+
+def test_ended_show_exposes_final_episode_context(severance, episode):
+    sensor = make_sensor(
+        severance,
+        LastKnownState(
+            has_successful_value=True,
+            episode=None,
+            show_status="Ended",
+            previous_episode=episode,
+            ended_date="2026-05-07",
+            network_name="NBC",
+            schedule_days=("Thursday",),
+            schedule_time="22:00",
+        ),
+    )
+    attributes = sensor.extra_state_attributes
+    assert sensor.native_value == "Ended"
+    assert attributes["ended_date"] == "2026-05-07"
+    assert attributes["network"] == "NBC"
+    assert attributes["final_episode_id"] == episode.episode_id
+    assert attributes["final_episode_name"] == episode.name
+    assert attributes["final_episode_code"] == "S02E04"
+    assert attributes["final_episode_air_date"] == episode.air_date
 
 
 def test_initial_unavailable_state(severance):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .api import TVMazeClient, TVMazeError, TVMazeNotFoundError
 from .const import (
     DOMAIN,
+    ENDED_RECHECK_DAYS,
     EVENT_SCHEDULE_CHANGED,
     MISSING_SHOW_404_THRESHOLD,
     STORAGE_KEY_PREFIX,
@@ -23,7 +24,6 @@ from .const import (
     EpisodeInfo,
     LastKnownState,
     ShowUpdateResult,
-    utc_now_iso,
 )
 from .repairs import async_create_missing_show_issue, async_delete_missing_show_issue
 
@@ -87,10 +87,17 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         await self._async_save()
 
     async def _async_update_data(self) -> dict[int, ShowUpdateResult]:
-        """Refresh every configured show, preserving last-good state on errors."""
+        """Refresh due shows, preserving last-good state on errors."""
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        now = datetime.now(UTC)
         await asyncio.gather(
-            *(self._async_refresh_show(show, semaphore) for show in self.shows)
+            *(
+                self._async_refresh_show(show, semaphore, now)
+                for show in self.shows
+                if not _should_skip_ended_refresh(
+                    self._states.get(show.tvmaze_id, LastKnownState()), now
+                )
+            )
         )
         await self._async_save()
         return {
@@ -101,11 +108,14 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         }
 
     async def _async_refresh_show(
-        self, show: ConfiguredShow, semaphore: asyncio.Semaphore
+        self,
+        show: ConfiguredShow,
+        semaphore: asyncio.Semaphore,
+        now: datetime,
     ) -> None:
         """Refresh one show while respecting the per-cycle concurrency limit."""
         async with semaphore:
-            attempt = utc_now_iso()
+            attempt = now.isoformat()
             previous = self._states.get(show.tvmaze_id, LastKnownState())
             try:
                 schedule = await self.client.async_get_show_schedule(show.tvmaze_id)
@@ -190,6 +200,11 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     previous_episode=schedule.previous_episode,
                     show_image_url=schedule.show_image_url,
                     consecutive_not_found=0,
+                    ended_date=schedule.ended_date,
+                    network_name=schedule.network_name,
+                    web_channel_name=schedule.web_channel_name,
+                    schedule_days=schedule.schedule_days,
+                    schedule_time=schedule.schedule_time,
                 )
 
     async def _async_save(self) -> None:
@@ -204,6 +219,21 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             )
         except Exception as err:  # Storage backends can raise implementation errors.
             _LOGGER.error("Unable to persist TV Show Monitor state: %s", err)
+
+
+def _should_skip_ended_refresh(state: LastKnownState, now: datetime) -> bool:
+    """Poll ended shows without upcoming episodes only once every 30 days."""
+    if state.show_status != "Ended" or state.episode is not None:
+        return False
+    if state.last_successful_update is None:
+        return False
+    try:
+        last_success = datetime.fromisoformat(state.last_successful_update)
+    except ValueError:
+        return False
+    if last_success.tzinfo is None:
+        last_success = last_success.replace(tzinfo=UTC)
+    return now - last_success < timedelta(days=ENDED_RECHECK_DAYS)
 
 
 def _schedule_change_type(

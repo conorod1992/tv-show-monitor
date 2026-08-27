@@ -16,6 +16,7 @@ MIN_POLL_INTERVAL_HOURS = 24
 MAX_POLL_INTERVAL_HOURS = 24 * 31
 MAX_SHOWS = 50
 MISSING_SHOW_404_THRESHOLD = 3
+ENDED_RECHECK_DAYS = 30
 CONF_SHOWS = "shows"
 CONF_SHOW_NAMES = "show_names"
 CONF_POLL_INTERVAL = "poll_interval_hours"
@@ -94,6 +95,11 @@ class ShowScheduleInfo:
     next_episode: EpisodeInfo | None
     previous_episode: EpisodeInfo | None
     show_image_url: str | None = None
+    ended_date: str | None = None
+    network_name: str | None = None
+    web_channel_name: str | None = None
+    schedule_days: tuple[str, ...] = ()
+    schedule_time: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +116,11 @@ class LastKnownState:
     previous_episode: EpisodeInfo | None = None
     show_image_url: str | None = None
     consecutive_not_found: int = 0
+    ended_date: str | None = None
+    network_name: str | None = None
+    web_channel_name: str | None = None
+    schedule_days: tuple[str, ...] = ()
+    schedule_time: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a serialisable representation."""
@@ -118,6 +129,7 @@ class LastKnownState:
         value["previous_episode"] = (
             self.previous_episode.as_dict() if self.previous_episode else None
         )
+        value["schedule_days"] = list(self.schedule_days)
         return value
 
     @classmethod
@@ -126,6 +138,11 @@ class LastKnownState:
         episode = value.get("episode")
         previous_episode = value.get("previous_episode")
         consecutive_not_found = value.get("consecutive_not_found", 0)
+        schedule_days = value.get("schedule_days", [])
+        if not isinstance(schedule_days, list) or not all(
+            isinstance(day, str) for day in schedule_days
+        ):
+            schedule_days = []
         return cls(
             has_successful_value=bool(value.get("has_successful_value", False)),
             episode=EpisodeInfo.from_dict(episode)
@@ -141,6 +158,11 @@ class LastKnownState:
             else None,
             show_image_url=_optional_str(value.get("show_image_url")),
             consecutive_not_found=max(0, int(consecutive_not_found)),
+            ended_date=_optional_str(value.get("ended_date")),
+            network_name=_optional_str(value.get("network_name")),
+            web_channel_name=_optional_str(value.get("web_channel_name")),
+            schedule_days=tuple(schedule_days),
+            schedule_time=_optional_str(value.get("schedule_time")),
         )
 
 

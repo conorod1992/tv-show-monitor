@@ -30,6 +30,11 @@ async def async_get_config_entry_diagnostics(
                 "canonical_name": result.show.canonical_name,
                 "tvmaze_id": result.show.tvmaze_id,
                 "show_status": result.state.show_status,
+                "ended_date": result.state.ended_date,
+                "network": result.state.network_name,
+                "web_channel": result.state.web_channel_name,
+                "schedule_days": list(result.state.schedule_days),
+                "schedule_time": result.state.schedule_time,
                 "next_episode_id": result.state.episode.episode_id
                 if result.state.episode
                 else None,
