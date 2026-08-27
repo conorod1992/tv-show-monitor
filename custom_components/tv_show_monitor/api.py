@@ -15,6 +15,8 @@ _LOGGER = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 15
 MAX_RETRIES = 1
 MAX_RETRY_AFTER = 30.0
+RETRY_DELAY = 1.0
+RETRYABLE_STATUSES = {500, 502, 503, 504}
 
 
 class TVMazeError(Exception):
@@ -128,6 +130,17 @@ class TVMazeClient:
                                 await asyncio.sleep(delay)
                                 continue
                             raise TVMazeRateLimitError("TVmaze rate limit exceeded")
+                        if response.status in RETRYABLE_STATUSES:
+                            if attempt < MAX_RETRIES:
+                                _LOGGER.warning(
+                                    "TVmaze returned HTTP %s; retrying once",
+                                    response.status,
+                                )
+                                await asyncio.sleep(RETRY_DELAY)
+                                continue
+                            raise TVMazeError(
+                                f"TVmaze returned HTTP {response.status}"
+                            )
                         if response.status == 404:
                             raise TVMazeNotFoundError("TVmaze resource not found")
                         if response.status >= 400:
@@ -139,6 +152,10 @@ class TVMazeClient:
                                 "TVmaze returned invalid JSON"
                             ) from err
             except TimeoutError as err:
+                if attempt < MAX_RETRIES:
+                    _LOGGER.warning("TVmaze request timed out; retrying once")
+                    await asyncio.sleep(RETRY_DELAY)
+                    continue
                 raise TVMazeError("TVmaze request timed out") from err
             except ClientError as err:
                 raise TVMazeError("Unable to communicate with TVmaze") from err
@@ -148,7 +165,7 @@ class TVMazeClient:
 def _retry_delay(response: ClientResponse) -> float:
     value = response.headers.get("Retry-After")
     if not value:
-        return 1.0
+        return RETRY_DELAY
     try:
         return min(MAX_RETRY_AFTER, max(0.0, float(value)))
     except ValueError:
@@ -159,7 +176,7 @@ def _retry_delay(response: ClientResponse) -> float:
             ).total_seconds()
             return min(MAX_RETRY_AFTER, max(0.0, delay))
         except KeyError, TypeError, ValueError:
-            return 1.0
+            return RETRY_DELAY
 
 
 def _optional_int(data: dict[str, Any], key: str) -> int | None:
