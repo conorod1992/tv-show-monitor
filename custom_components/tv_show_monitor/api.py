@@ -229,8 +229,10 @@ def _retry_delay(response: ClientResponse) -> float:
 def _show_network_name(show: dict[str, Any]) -> str | None:
     for key in ("network", "webChannel"):
         value = show.get(key)
-        if isinstance(value, dict) and isinstance(value.get("name"), str):
-            return value["name"]
+        if isinstance(value, dict):
+            name = value.get("name")
+            if isinstance(name, str):
+                return name
     return None
 
 
@@ -240,8 +242,10 @@ def _show_country_name(show: dict[str, Any]) -> str | None:
         if not isinstance(value, dict):
             continue
         country = value.get("country")
-        if isinstance(country, dict) and isinstance(country.get("name"), str):
-            return country["name"]
+        if isinstance(country, dict):
+            name = country.get("name")
+            if isinstance(name, str):
+                return name
     return None
 
 
