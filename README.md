@@ -57,7 +57,9 @@ Each entity is naturally named from the canonical TVmaze title, for example
 
 The sensor state intentionally remains simple and stable. Richer programme and
 schedule information is exposed as attributes so existing automations do not need
-to change.
+to change. When TVmaze provides show artwork, the sensor also uses the show's poster
+as its Home Assistant entity picture. The smaller TVmaze image is preferred to keep
+dashboard image loads lightweight, with the original image used only as a fallback.
 
 Template example:
 
@@ -78,8 +80,8 @@ When available, each sensor now exposes:
 
 A valid no-episode result includes `next_episode_found: false`. Every result reports
 the latest attempt and whether it succeeded; a failed attempt also exposes a short,
-safe `last_error`. Last-good show status, previous episode and next episode data are
-preserved through transient refresh failures and Home Assistant restarts.
+safe `last_error`. Last-good show status, artwork, previous episode and next episode
+data are preserved through transient refresh failures and Home Assistant restarts.
 
 ## Schedule change events
 
@@ -137,12 +139,13 @@ diagnostics. Last-good state is stored by Home Assistant and survives restarts.
 
 ## TVmaze attribution
 
-Schedule and programme data is provided by [TVmaze](https://www.tvmaze.com/).
+Schedule, programme data and artwork are provided by [TVmaze](https://www.tvmaze.com/).
 TV Show Monitor is not affiliated with or endorsed by TVmaze.
 
 ## Known limitations
 
 - TVmaze only reports publicly scheduled future episodes.
+- Show artwork is only available when TVmaze supplies an image for that show.
 - `days_until` is based on TVmaze's published air date rather than the viewer's
   personal streaming availability.
 - Polling intervals use whole 24-hour steps and cannot be shorter than one day.
