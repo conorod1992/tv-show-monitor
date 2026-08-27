@@ -38,7 +38,8 @@ result. Setup is rejected in full if any title cannot be resolved or two titles
 resolve to the same show. Routine polling uses the saved TVmaze ID, not the title.
 
 To add, remove, or rename entries later, open the integration's **Configure**
-dialog and replace the complete list.
+dialog and replace the complete list. Existing titles retain their saved TVmaze
+match, so only newly added or renamed titles need to be searched again.
 
 ## Sensor states
 
