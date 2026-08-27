@@ -42,13 +42,13 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        """Return an ISO date, the explicit no-episode text, or unavailable."""
+        """Return the next air date or a lifecycle-aware no-episode state."""
         state = self.result.state
         if not state.has_successful_value:
             return None
-        if state.episode is None:
-            return NO_NEXT_EPISODE
-        return state.episode.air_date
+        if state.episode is not None:
+            return state.episode.air_date
+        return _no_episode_state(state.show_status)
 
     @property
     def entity_picture(self) -> str | None:
@@ -57,12 +57,17 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose show, episode, schedule and safe refresh diagnostics."""
+        """Expose show, episode, lifecycle and safe refresh diagnostics."""
         result = self.result
         state = result.state
         attributes: dict[str, Any] = {
             "tvmaze_show_id": result.show.tvmaze_id,
             "show_status": state.show_status,
+            "ended_date": state.ended_date,
+            "network": state.network_name,
+            "web_channel": state.web_channel_name,
+            "schedule_days": list(state.schedule_days),
+            "schedule_time": state.schedule_time,
             "last_successful_update": state.last_successful_update,
             "last_update_attempt": state.last_update_attempt,
             "last_attempt_successful": state.last_attempt_successful,
@@ -117,9 +122,32 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
             if code is not None:
                 attributes["previous_episode_code"] = code
 
+            if state.show_status == "Ended" and state.episode is None:
+                attributes.update(
+                    {
+                        "final_episode_id": previous.episode_id,
+                        "final_episode_name": previous.name,
+                        "final_episode_air_date": previous.air_date,
+                    }
+                )
+                if code is not None:
+                    attributes["final_episode_code"] = code
+
         if state.last_attempt_successful is False:
             attributes["last_error"] = state.last_error
         return attributes
+
+
+def _no_episode_state(show_status: str | None) -> str:
+    if show_status == "Ended":
+        return "Ended"
+    if show_status == "Running":
+        return "No next episode scheduled"
+    if show_status == "In Development":
+        return "In Development"
+    if show_status == "To Be Determined":
+        return "To Be Determined"
+    return NO_NEXT_EPISODE
 
 
 def _days_until(air_date: str) -> int | None:
