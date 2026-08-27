@@ -140,7 +140,7 @@ async def test_successful_next_episode(episode):
     assert result == episode
 
 
-async def test_show_schedule_includes_status_and_previous_episode(episode):
+async def test_show_schedule_includes_status_previous_episode_and_artwork(episode):
     previous = {
         "id": 900,
         "name": "Previous",
@@ -157,6 +157,10 @@ async def test_show_schedule_includes_status_and_previous_episode(episode):
         "id": 216,
         "name": "Severance",
         "status": "Running",
+        "image": {
+            "medium": "https://static.tvmaze.test/severance-medium.jpg",
+            "original": "https://static.tvmaze.test/severance-original.jpg",
+        },
         "_embedded": {
             "nextepisode": {
                 "id": episode.episode_id,
@@ -181,6 +185,19 @@ async def test_show_schedule_includes_status_and_previous_episode(episode):
     assert result.previous_episode is not None
     assert result.previous_episode.episode_id == 900
     assert result.previous_episode.name == "Previous"
+    assert result.show_image_url == "https://static.tvmaze.test/severance-medium.jpg"
+
+
+async def test_show_artwork_falls_back_to_original():
+    payload = {
+        "id": 216,
+        "name": "Severance",
+        "image": {"original": "https://static.tvmaze.test/severance-original.jpg"},
+    }
+    result = await TVMazeClient(
+        FakeSession(FakeResponse(payload=payload))
+    ).async_get_show_schedule(216)
+    assert result.show_image_url == "https://static.tvmaze.test/severance-original.jpg"
 
 
 @pytest.mark.parametrize(
