@@ -9,7 +9,11 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.tv_show_monitor.api import ShowSearchCandidate, TVMazeClient, TVMazeError
+from custom_components.tv_show_monitor.api import (
+    ShowSearchCandidate,
+    TVMazeClient,
+    TVMazeError,
+)
 from custom_components.tv_show_monitor.config_flow import (
     CONF_CANDIDATE_ID,
     CONF_SHOW_ID,
@@ -119,7 +123,9 @@ async def test_show_list_validation(hass, raw, error):
 
 async def test_setup_search_failure_does_not_create_partial_entry(hass):
     with patch.object(
-        TVMazeClient, "async_search_shows", AsyncMock(side_effect=TVMazeError("offline"))
+        TVMazeClient,
+        "async_search_shows",
+        AsyncMock(side_effect=TVMazeError("offline")),
     ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
