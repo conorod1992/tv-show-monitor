@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 DOMAIN = "tv_show_monitor"
@@ -126,8 +126,8 @@ class ShowUpdateResult:
 
 
 def utc_now_iso() -> str:
-    """Return an ISO timestamp for persistent diagnostics."""
-    return datetime.now().astimezone().isoformat()
+    """Return an ISO timestamp in UTC for persistent diagnostics."""
+    return datetime.now(UTC).isoformat()
 
 
 def _optional_int(value: Any) -> int | None:
