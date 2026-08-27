@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 from custom_components.tv_show_monitor.const import (
     DOMAIN,
@@ -28,12 +29,24 @@ def test_date_state_stable_identity_attributes_and_device(severance, episode):
             "2026-01-01T00:00:00+00:00",
             "2026-01-01T00:00:00+00:00",
             True,
+            show_status="Running",
+            previous_episode=episode,
         ),
     )
+    with patch(
+        "custom_components.tv_show_monitor.sensor.dt_util.now",
+        return_value=datetime(2026, 10, 10, tzinfo=UTC),
+    ):
+        attributes = sensor.extra_state_attributes
     assert sensor.native_value == "2026-10-12"
     assert sensor.unique_id == f"{DOMAIN}_216_next_episode"
-    assert sensor.extra_state_attributes["episode_code"] == "S02E04"
-    assert sensor.extra_state_attributes["episode_name"] == episode.name
+    assert attributes["episode_code"] == "S02E04"
+    assert attributes["episode_name"] == episode.name
+    assert attributes["show_status"] == "Running"
+    assert attributes["days_until"] == 2
+    assert attributes["next_airing"] == episode.air_stamp
+    assert attributes["previous_episode_name"] == episode.name
+    assert attributes["previous_episode_code"] == "S02E04"
     assert sensor.device_info["identifiers"] == {(DOMAIN, "216")}
     assert sensor.device_info["manufacturer"] == "TVmaze"
 
