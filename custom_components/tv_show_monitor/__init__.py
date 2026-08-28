@@ -20,6 +20,7 @@ from .const import (
     ConfiguredShow,
 )
 from .coordinator import TVShowMonitorCoordinator
+from .frontend import async_register_frontend
 from .repairs import async_delete_missing_show_issue
 
 
@@ -37,6 +38,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: TVShowMonitorConfigEntry
 ) -> bool:
     """Set up TV Show Monitor from a config entry."""
+    await async_register_frontend(hass)
     raw_shows = entry.options.get(CONF_SHOWS, entry.data[CONF_SHOWS])
     shows = tuple(ConfiguredShow.from_dict(item) for item in raw_shows)
     await _async_remove_obsolete_registry_entries(hass, entry, shows)
@@ -57,7 +59,10 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: TVShowMonitorConfigEntry
 ) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        await entry.runtime_data.coordinator.async_shutdown()
+    return unloaded
 
 
 async def _async_remove_obsolete_registry_entries(
