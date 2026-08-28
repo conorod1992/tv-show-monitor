@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tv_show_monitor.const import (
     EVENT_EPISODE_AIRING,
@@ -26,7 +27,7 @@ def make_coordinator(hass, show, schedule):
     """Build a coordinator with a fixed TVmaze schedule response."""
     client = AsyncMock()
     client.async_get_show_schedule.return_value = schedule
-    entry = MagicMock(entry_id="test")
+    entry = MockConfigEntry(domain="tv_show_monitor", entry_id="test")
     coordinator = TVShowMonitorCoordinator(hass, client, (show,), 24, entry)
     coordinator._store = AsyncMock()
     return coordinator
