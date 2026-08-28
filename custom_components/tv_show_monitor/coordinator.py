@@ -11,7 +11,10 @@ from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_point_in_time, async_track_time_change
+from homeassistant.helpers.event import (
+    async_track_point_in_time,
+    async_track_time_change,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -83,7 +86,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                 if isinstance(raw, dict):
                     try:
                         state = LastKnownState.from_dict(raw)
-                    except (KeyError, TypeError, ValueError):
+                    except KeyError, TypeError, ValueError:
                         _LOGGER.warning(
                             "Ignoring invalid persisted state for TVmaze show ID %s",
                             show.tvmaze_id,
@@ -95,6 +98,8 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                                 self.hass, self._entry_id, show
                             )
         self._ensure_day_listener()
+        for show in self.shows:
+            self._schedule_airing_event(show)
         await self._async_save()
 
     async def _async_update_data(self) -> dict[int, ShowUpdateResult]:
@@ -159,7 +164,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     last_attempt_successful=False,
                     last_error=error,
                 )
-            except (KeyError, TypeError, ValueError) as err:
+            except KeyError, TypeError, ValueError as err:
                 error = _safe_error(err)
                 _LOGGER.warning(
                     "Unable to parse refresh for TVmaze show ID %s: %s",
@@ -378,6 +383,8 @@ def _schedule_change_type(
     if old is None:
         return "scheduled"
     if new is None:
+        if _episode_has_aired(old, now):
+            return None
         return "schedule_cleared"
     if old.episode_id != new.episode_id:
         if _is_routine_episode_progression(old, new, now):
@@ -388,21 +395,24 @@ def _schedule_change_type(
     return None
 
 
+def _episode_has_aired(episode: EpisodeInfo, now: datetime) -> bool:
+    """Return true when the known episode is safely in the past."""
+    airing = _episode_airing_datetime(episode, "UTC")
+    if airing is not None and episode.air_stamp is not None:
+        return airing <= now
+    try:
+        air_date = date.fromisoformat(episode.air_date)
+    except ValueError:
+        return False
+    return air_date < now.date()
+
+
 def _is_routine_episode_progression(
     old: EpisodeInfo, new: EpisodeInfo, now: datetime
 ) -> bool:
     """Return true when the old next episode has aired and the schedule advanced."""
-    old_airing = _episode_airing_datetime(old, "UTC")
-    if old_airing is not None and old.air_stamp is not None:
-        if old_airing > now:
-            return False
-    else:
-        try:
-            old_date = date.fromisoformat(old.air_date)
-        except ValueError:
-            return False
-        if old_date >= now.date():
-            return False
+    if not _episode_has_aired(old, now):
+        return False
 
     if old.season is not None and old.number is not None:
         if new.season is None or new.number is None:
@@ -414,9 +424,7 @@ def _is_routine_episode_progression(
     return new_sort > old_sort
 
 
-def _episode_today_key(
-    episode: EpisodeInfo | None, local_time_zone: str
-) -> str | None:
+def _episode_today_key(episode: EpisodeInfo | None, local_time_zone: str) -> str | None:
     if episode is None:
         return None
     return f"{episode.episode_id}:{_episode_local_air_date(episode, local_time_zone)}"
@@ -457,7 +465,7 @@ def _episode_airing_datetime(
         air_date = date.fromisoformat(episode.air_date)
         air_time = time.fromisoformat(episode.air_time)
         zone = ZoneInfo(local_time_zone)
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return None
     return datetime.combine(air_date, air_time, tzinfo=zone).astimezone(UTC)
 
