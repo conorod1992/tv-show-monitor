@@ -20,7 +20,17 @@ jobs:
       - run: ruff format --check .
       - run: ruff check .
       - run: mypy custom_components/tv_show_monitor
-      - run: pytest --cov=custom_components.tv_show_monitor --cov-report=term-missing
+      - name: Run pytest
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest --cov=custom_components.tv_show_monitor --cov-report=term-missing 2>&1 | tee pytest-output.txt
+      - name: Upload pytest output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output
+          path: pytest-output.txt
 
   hassfest:
     runs-on: ubuntu-latest
