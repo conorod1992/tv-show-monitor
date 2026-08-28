@@ -25,6 +25,9 @@ STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
 NO_NEXT_EPISODE = "No next episode found"
 EVENT_SCHEDULE_CHANGED = f"{DOMAIN}_schedule_changed"
+EVENT_EPISODE_TODAY = f"{DOMAIN}_episode_today"
+EVENT_EPISODE_AIRING = f"{DOMAIN}_episode_airing"
+EVENT_STATUS_CHANGED = f"{DOMAIN}_status_changed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,8 @@ class LastKnownState:
     web_channel_name: str | None = None
     schedule_days: tuple[str, ...] = ()
     schedule_time: str | None = None
+    episode_today_fired_key: str | None = None
+    episode_airing_fired_key: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a serialisable representation."""
@@ -163,6 +168,12 @@ class LastKnownState:
             web_channel_name=_optional_str(value.get("web_channel_name")),
             schedule_days=tuple(schedule_days),
             schedule_time=_optional_str(value.get("schedule_time")),
+            episode_today_fired_key=_optional_str(
+                value.get("episode_today_fired_key")
+            ),
+            episode_airing_fired_key=_optional_str(
+                value.get("episode_airing_fired_key")
+            ),
         )
 
 
