@@ -35,6 +35,7 @@ class TVShowMonitorPanel extends HTMLElement {
 
     const today = shows.filter((show) => show.group === "today");
     const upcoming = shows.filter((show) => show.group === "upcoming");
+    const recent = shows.filter((show) => show.group === "recent").reverse();
     const unscheduled = shows.filter((show) => show.group === "unscheduled");
     const ended = shows.filter((show) => show.group === "ended");
 
@@ -48,6 +49,7 @@ class TVShowMonitorPanel extends HTMLElement {
         ${shows.length === 0 ? this._emptyState() : ""}
         ${this._section("Today", today)}
         ${this._section("Coming up", upcoming)}
+        ${this._section("Recent", recent)}
         ${this._section("No episode scheduled", unscheduled)}
         ${this._section("Ended", ended)}
       </div>
@@ -69,14 +71,23 @@ class TVShowMonitorPanel extends HTMLElement {
   _showFromState(entityId, state) {
     const attr = state.attributes || {};
     const airing = this._airingDate(attr);
-    const today = new Date();
+    const now = new Date();
     const localDate = airing ? this._dateKey(airing) : attr.air_date || null;
-    const todayKey = this._dateKey(today);
+    const todayKey = this._dateKey(now);
     const hasEpisode = attr.next_episode_found === true;
     let group = "unscheduled";
-    if (state.state === "Ended" || attr.show_status === "Ended") group = "ended";
-    else if (hasEpisode && localDate === todayKey) group = "today";
-    else if (hasEpisode) group = "upcoming";
+
+    if (state.state === "Ended" || attr.show_status === "Ended") {
+      group = "ended";
+    } else if (hasEpisode && localDate === todayKey) {
+      group = "today";
+    } else if (hasEpisode && airing && airing < now) {
+      group = "recent";
+    } else if (hasEpisode && localDate && localDate < todayKey) {
+      group = "recent";
+    } else if (hasEpisode) {
+      group = "upcoming";
+    }
 
     return {
       entityId,
@@ -108,7 +119,7 @@ class TVShowMonitorPanel extends HTMLElement {
     const titleLine = hasEpisode
       ? [episodeCode, episodeName].filter(Boolean).join(" · ") || "Next episode"
       : this._noEpisodeText(attr.show_status, show.state.state);
-    const when = hasEpisode ? this._friendlyAiring(airing, attr) : this._normalSchedule(attr);
+    const when = hasEpisode ? this._friendlyAiring(airing, attr) : "";
     const finalEpisode = show.group === "ended" && attr.final_episode_code
       ? `Final episode: ${attr.final_episode_code}${attr.final_episode_name ? ` · ${attr.final_episode_name}` : ""}`
       : "";
@@ -121,7 +132,7 @@ class TVShowMonitorPanel extends HTMLElement {
         <div class="content">
           <div class="show-name">${this._escape(show.name)}</div>
           <div class="episode">${this._escape(titleLine)}</div>
-          ${when ? `<div class="detail">${this._escape(when)}</div>` : ""}
+          ${when ? `<div class="detail">${when}</div>` : ""}
           ${channel ? `<div class="detail">${this._escape(channel)}</div>` : ""}
           ${finalEpisode ? `<div class="detail muted">${this._escape(finalEpisode)}</div>` : ""}
           ${attr.runtime ? `<div class="detail muted">${this._escape(String(attr.runtime))} min</div>` : ""}
@@ -131,25 +142,67 @@ class TVShowMonitorPanel extends HTMLElement {
   }
 
   _friendlyAiring(airing, attr) {
-    if (airing) {
-      const locale = this._hass.locale?.language || navigator.language;
-      const date = new Intl.DateTimeFormat(locale, {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-      }).format(airing);
-      const time = new Intl.DateTimeFormat(locale, {
-        hour: "numeric",
-        minute: "2-digit",
-      }).format(airing);
-      return `${date} · ${time}`;
+    if (!airing) {
+      return this._escape([attr.air_date, attr.air_time].filter(Boolean).join(" · "));
     }
-    return [attr.air_date, attr.air_time].filter(Boolean).join(" · ");
+
+    const locale = this._hass.locale?.language || navigator.language;
+    const options = this._timeZone() ? { timeZone: this._timeZone() } : {};
+    const time = new Intl.DateTimeFormat(locale, {
+      ...options,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(airing);
+    const todayKey = this._dateKey(new Date());
+    const airingKey = this._dateKey(airing);
+    const dayDifference = this._dayDifference(todayKey, airingKey);
+
+    if (dayDifference === 0) {
+      const suffix = airing <= new Date() ? `Aired at ${this._escape(time)}` : this._escape(time);
+      return `<strong>Today</strong> · ${suffix}`;
+    }
+    if (dayDifference === 1) {
+      return `<strong>Tomorrow</strong> · ${this._escape(time)}`;
+    }
+    if (dayDifference === -1) {
+      return `<strong>Yesterday</strong> · ${this._escape(time)}`;
+    }
+    if (dayDifference < -1) {
+      return `Aired ${Math.abs(dayDifference)} days ago · ${this._escape(time)}`;
+    }
+
+    const date = new Intl.DateTimeFormat(locale, {
+      ...options,
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }).format(airing);
+    return `${this._escape(date)} · ${this._escape(time)}`;
   }
 
-  _normalSchedule(attr) {
-    if (!attr.schedule_days?.length && !attr.schedule_time) return "";
-    return [attr.schedule_days?.join(", "), attr.schedule_time].filter(Boolean).join(" · ");
+  _timeZone() {
+    return this._hass?.config?.time_zone || undefined;
+  }
+
+  _dateKey(value) {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      ...(this._timeZone() ? { timeZone: this._timeZone() } : {}),
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = Object.fromEntries(
+      formatter.formatToParts(value).map((part) => [part.type, part.value])
+    );
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  }
+
+  _dayDifference(fromKey, toKey) {
+    const [fromYear, fromMonth, fromDay] = fromKey.split("-").map(Number);
+    const [toYear, toMonth, toDay] = toKey.split("-").map(Number);
+    const fromDate = Date.UTC(fromYear, fromMonth - 1, fromDay);
+    const toDate = Date.UTC(toYear, toMonth - 1, toDay);
+    return Math.round((toDate - fromDate) / 86400000);
   }
 
   _noEpisodeText(status, state) {
@@ -163,13 +216,6 @@ class TVShowMonitorPanel extends HTMLElement {
     if (!attr.air_stamp) return null;
     const value = new Date(attr.air_stamp);
     return Number.isNaN(value.getTime()) ? null : value;
-  }
-
-  _dateKey(value) {
-    const year = value.getFullYear();
-    const month = String(value.getMonth() + 1).padStart(2, "0");
-    const day = String(value.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
   }
 
   _sortValue(show) {
