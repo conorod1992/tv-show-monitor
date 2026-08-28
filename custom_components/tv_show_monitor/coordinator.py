@@ -216,7 +216,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                             },
                         )
 
-                today_key = _episode_today_key(schedule.next_episode)
+                today_key = _episode_today_key(
+                    schedule.next_episode, self.hass.config.time_zone
+                )
                 airing_key = _episode_airing_key(schedule.next_episode)
                 self._states[show.tvmaze_id] = LastKnownState(
                     has_successful_value=True,
@@ -269,15 +271,18 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             self.hass.async_create_task(self._async_save())
 
     def _fire_episode_today_if_due(self, show: ConfiguredShow) -> bool:
-        """Fire once when a scheduled episode's air date is today locally."""
+        """Fire once when a scheduled episode airs today in Home Assistant time."""
         state = self._states.get(show.tvmaze_id)
         if state is None or state.episode is None:
             return False
         episode = state.episode
-        key = _episode_today_key(episode)
+        key = _episode_today_key(episode, self.hass.config.time_zone)
         if key is None or state.episode_today_fired_key == key:
             return False
-        if episode.air_date != dt_util.now().date().isoformat():
+        if (
+            _episode_local_air_date(episode, self.hass.config.time_zone)
+            != dt_util.now().date().isoformat()
+        ):
             return False
         self.hass.bus.async_fire(
             EVENT_EPISODE_TODAY,
@@ -298,7 +303,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         if key is None or state.episode_airing_fired_key == key:
             return
         airing = _episode_airing_datetime(episode, self.hass.config.time_zone)
-        if airing is None or airing <= dt_util.utcnow():
+        if airing is None or airing <= datetime.now(UTC):
             return
 
         @callback
@@ -409,10 +414,23 @@ def _is_routine_episode_progression(
     return new_sort > old_sort
 
 
-def _episode_today_key(episode: EpisodeInfo | None) -> str | None:
+def _episode_today_key(
+    episode: EpisodeInfo | None, local_time_zone: str
+) -> str | None:
     if episode is None:
         return None
-    return f"{episode.episode_id}:{episode.air_date}"
+    return f"{episode.episode_id}:{_episode_local_air_date(episode, local_time_zone)}"
+
+
+def _episode_local_air_date(episode: EpisodeInfo, local_time_zone: str) -> str:
+    airing = _episode_airing_datetime(episode, local_time_zone)
+    if airing is None:
+        return episode.air_date
+    try:
+        zone = ZoneInfo(local_time_zone)
+    except KeyError:
+        return episode.air_date
+    return airing.astimezone(zone).date().isoformat()
 
 
 def _episode_airing_key(episode: EpisodeInfo | None) -> str | None:
