@@ -3,6 +3,7 @@
   "name": "TV Show Monitor",
   "codeowners": ["@conorod1992"],
   "config_flow": true,
+  "dependencies": ["frontend", "http"],
   "documentation": "https://github.com/conorod1992/tv-show-monitor",
   "integration_type": "service",
   "iot_class": "cloud_polling",

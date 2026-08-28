@@ -9,8 +9,8 @@ follow. It creates one sensor and one Home Assistant device per TV show.
 > Screenshots will be added after the first release.
 
 - Configuration flow — placeholder
+- TV Show Monitor viewer — placeholder
 - Show sensor and attributes — placeholder
-- Options flow — placeholder
 
 ## Installation
 
@@ -46,12 +46,32 @@ searches the new title; removing a show performs no title lookup. Changing a mat
 lets you search again and explicitly select the correct TVmaze result. Polling
 interval changes are handled separately and never rematch shows.
 
+## TV Show Monitor viewer
+
+TV Show Monitor includes a simple viewer so you do not need to open Developer Tools
+just to check episode details.
+
+The viewer groups followed shows into:
+
+- **Today**;
+- **Coming up**;
+- **No episode scheduled**;
+- **Ended**.
+
+Each show card can display the poster, episode code and name, your local airing date
+and time, network or streaming service, runtime, and final-episode details where
+available. Click a card to open Home Assistant's normal entity details.
+
+The viewer is available as a Home Assistant panel, but it is **hidden from the
+sidebar by default** to avoid adding clutter. Users who want quick access can choose
+to show it in their sidebar.
+
 ## Sensor states
 
 Each entity is naturally named from the canonical TVmaze title, for example
 `sensor.severance_next_episode`.
 
-- A scheduled episode: its local calendar date in ISO format, such as `2026-10-12`.
+- A scheduled episode: its TVmaze air date in ISO format, such as `2026-10-12`.
 - A `Running` show with no scheduled episode: `No next episode scheduled`.
 - An `Ended` show with no scheduled episode: `Ended`.
 - An `In Development` show with no scheduled episode: `In Development`.
@@ -75,7 +95,7 @@ Template example:
 
 When available, each sensor exposes:
 
-- TVmaze show ID and current show status;
+- TVmaze show ID, show name and current show status;
 - ended date for ended shows;
 - current network and/or web channel;
 - TVmaze's normal schedule days and time;
@@ -95,7 +115,39 @@ safe `last_error`. Last-good lifecycle metadata, artwork, previous episode and n
 episode data are preserved through transient refresh failures and Home Assistant
 restarts.
 
-## Schedule change events
+## Home Assistant events
+
+### Episode today
+
+`tv_show_monitor_episode_today` fires once when a monitored episode's airing date is
+today in Home Assistant's local time. If a new episode is first discovered during
+the day, the event can still fire on that refresh rather than waiting for another
+midnight.
+
+### Episode airing
+
+`tv_show_monitor_episode_airing` fires at the known airing time. The integration
+schedules this locally from TVmaze's absolute air timestamp, so it does not depend on
+the normal 24-hour polling interval happening at exactly the right moment.
+
+Both episode events include:
+
+- `tvmaze_show_id` and `show_name`;
+- episode ID, name, season, number and episode code;
+- air date, air time and air stamp;
+- runtime;
+- network and web channel when known.
+
+Delivery markers are persisted so normal refreshes and Home Assistant restarts do
+not repeat an event that has already fired for the same scheduled episode.
+
+### Status changed
+
+`tv_show_monitor_status_changed` fires when TVmaze changes a known show status, for
+example from `Running` to `Ended`. Event data includes `tvmaze_show_id`, `show_name`,
+`old_status`, and `new_status`.
+
+### Schedule changed
 
 After the integration has established a successful baseline, meaningful changes to
 the next-episode schedule fire a `tv_show_monitor_schedule_changed` Home Assistant
@@ -105,30 +157,31 @@ upcoming episode.
 `change_type` is one of:
 
 - `scheduled` — a show with no known next episode gains one;
-- `schedule_cleared` — a previously scheduled next episode disappears;
-- `next_episode_changed` — TVmaze now identifies a different episode as next;
+- `schedule_cleared` — a future scheduled next episode disappears;
+- `next_episode_changed` — TVmaze replaces the future next episode with a different one;
 - `rescheduled` — the same episode ID has a different air date or air stamp.
 
-Event data includes `tvmaze_show_id`, `show_name`, old/new episode IDs, old/new air
-dates and old/new air stamps. This makes schedule-driven automations reliable
-without having to infer the kind of change from sensor state transitions.
+Normal episode progression after an episode has aired is not treated as a schedule
+correction just because TVmaze now reports the following episode as next.
+
+Schedule-change event data includes `tvmaze_show_id`, `show_name`, old/new episode
+IDs, old/new air dates and old/new air stamps.
 
 Example event trigger:
 
 ```yaml
 triggers:
   - trigger: event
-    event_type: tv_show_monitor_schedule_changed
-    event_data:
-      tvmaze_show_id: 216
+    event_type: tv_show_monitor_episode_today
 conditions: []
 actions:
   - action: notify.notify
     data:
-      title: TV schedule changed
+      title: New episode today
       message: >-
-        {{ trigger.event.data.show_name }}:
-        {{ trigger.event.data.change_type }}
+        {{ trigger.event.data.show_name }} —
+        {{ trigger.event.data.episode_code }}
+        {{ trigger.event.data.episode_name }}
 mode: single
 ```
 

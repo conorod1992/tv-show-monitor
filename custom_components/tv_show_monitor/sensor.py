@@ -62,6 +62,8 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
         state = result.state
         attributes: dict[str, Any] = {
             "tvmaze_show_id": result.show.tvmaze_id,
+            "show_name": result.show.canonical_name,
+            "show_url": result.show.show_url,
             "show_status": state.show_status,
             "ended_date": state.ended_date,
             "network": state.network_name,
@@ -94,7 +96,6 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
                     "next_airing": episode.air_stamp,
                     "runtime": episode.runtime,
                     "episode_url": episode.url,
-                    "show_url": result.show.show_url,
                 }
             )
             days_until = _days_until(episode.air_date)
