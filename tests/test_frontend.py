@@ -12,7 +12,9 @@ from custom_components.tv_show_monitor.frontend import (
 
 async def test_frontend_panel_starts_hidden_from_sidebar(hass):
     with (
-        patch.object(hass.http, "async_register_static_paths", new=AsyncMock()) as static,
+        patch.object(
+            hass.http, "async_register_static_paths", new=AsyncMock()
+        ) as static,
         patch(
             "custom_components.tv_show_monitor.frontend.frontend.async_panel_exists",
             return_value=False,
