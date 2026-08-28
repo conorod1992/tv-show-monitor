@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.tv_show_monitor.frontend import (
     PANEL_URL_PATH,
@@ -11,10 +11,10 @@ from custom_components.tv_show_monitor.frontend import (
 
 
 async def test_frontend_panel_starts_hidden_from_sidebar(hass):
+    http = MagicMock()
+    http.async_register_static_paths = AsyncMock()
     with (
-        patch.object(
-            hass.http, "async_register_static_paths", new=AsyncMock()
-        ) as static,
+        patch.object(hass, "http", http),
         patch(
             "custom_components.tv_show_monitor.frontend.frontend.async_panel_exists",
             return_value=False,
@@ -26,7 +26,7 @@ async def test_frontend_panel_starts_hidden_from_sidebar(hass):
         await async_register_frontend(hass)
         await async_register_frontend(hass)
 
-    static.assert_awaited_once()
+    http.async_register_static_paths.assert_awaited_once()
     register.assert_called_once()
     kwargs = register.call_args.kwargs
     assert kwargs["frontend_url_path"] == PANEL_URL_PATH
