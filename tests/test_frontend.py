@@ -49,5 +49,5 @@ def test_viewer_exposes_clear_timing_sections() -> None:
     assert 'this._section("Coming up", upcoming)' in panel
     assert 'this._section("Recent", recent)' in panel
     assert "<strong>Tomorrow</strong>" in panel
-    assert 'this._hass?.config?.time_zone' in panel
+    assert "this._hass?.config?.time_zone" in panel
     assert 'hasEpisode ? this._friendlyAiring(airing, attr) : ""' in panel
