@@ -124,8 +124,23 @@ def test_normal_episode_progression_is_not_a_schedule_change(episode):
         number=5,
     )
 
+    assert _schedule_change_type(old, new, datetime(2026, 10, 13, tzinfo=UTC)) is None
+
+
+def test_aired_episode_disappearing_is_not_schedule_cleared(episode):
+    old = replace(
+        episode,
+        air_date="2026-10-12",
+        air_stamp="2026-10-12T20:00:00+00:00",
+    )
+
+    assert _schedule_change_type(old, None, datetime(2026, 10, 13, tzinfo=UTC)) is None
+
+
+def test_future_episode_disappearing_is_schedule_cleared(episode):
     assert (
-        _schedule_change_type(old, new, datetime(2026, 10, 13, tzinfo=UTC)) is None
+        _schedule_change_type(episode, None, datetime(2026, 10, 1, tzinfo=UTC))
+        == "schedule_cleared"
     )
 
 
