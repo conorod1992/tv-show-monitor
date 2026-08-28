@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.tv_show_monitor.frontend import (
@@ -33,3 +34,20 @@ async def test_frontend_panel_starts_hidden_from_sidebar(hass):
     assert kwargs["sidebar_default_visible"] is False
     assert kwargs["show_in_sidebar"] is True
     assert kwargs["require_admin"] is False
+
+
+def test_viewer_exposes_clear_timing_sections() -> None:
+    panel = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "tv_show_monitor"
+        / "frontend"
+        / "tv-show-monitor-panel.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'this._section("Today", today)' in panel
+    assert 'this._section("Coming up", upcoming)' in panel
+    assert 'this._section("Recent", recent)' in panel
+    assert "<strong>Tomorrow</strong>" in panel
+    assert "this._hass?.config?.time_zone" in panel
+    assert 'hasEpisode ? this._friendlyAiring(airing, attr) : ""' in panel
