@@ -168,9 +168,7 @@ class LastKnownState:
             web_channel_name=_optional_str(value.get("web_channel_name")),
             schedule_days=tuple(schedule_days),
             schedule_time=_optional_str(value.get("schedule_time")),
-            episode_today_fired_key=_optional_str(
-                value.get("episode_today_fired_key")
-            ),
+            episode_today_fired_key=_optional_str(value.get("episode_today_fired_key")),
             episode_airing_fired_key=_optional_str(
                 value.get("episode_airing_fired_key")
             ),
