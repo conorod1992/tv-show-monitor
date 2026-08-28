@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from homeassistant.util import dt as dt_util
@@ -11,7 +11,6 @@ from homeassistant.util import dt as dt_util
 from custom_components.tv_show_monitor.const import (
     EVENT_EPISODE_AIRING,
     EVENT_EPISODE_TODAY,
-    EVENT_SCHEDULE_CHANGED,
     EVENT_STATUS_CHANGED,
     LastKnownState,
     ShowScheduleInfo,
