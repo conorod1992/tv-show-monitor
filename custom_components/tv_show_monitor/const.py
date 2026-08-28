@@ -8,7 +8,7 @@ from typing import Any
 
 DOMAIN = "tv_show_monitor"
 NAME = "TV Show Monitor"
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 API_BASE_URL = "https://api.tvmaze.com"
 USER_AGENT = "TV-Show-Monitor/HomeAssistant"
 DEFAULT_POLL_INTERVAL_HOURS = 24
