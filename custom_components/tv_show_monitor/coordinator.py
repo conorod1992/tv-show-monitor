@@ -164,7 +164,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     last_attempt_successful=False,
                     last_error=error,
                 )
-            except KeyError, TypeError, ValueError as err:
+            except (KeyError, TypeError, ValueError) as err:
                 error = _safe_error(err)
                 _LOGGER.warning(
                     "Unable to parse refresh for TVmaze show ID %s: %s",
