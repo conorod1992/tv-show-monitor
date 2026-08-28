@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from unittest.mock import patch
 
 import pytest
@@ -26,6 +26,27 @@ def block_tvmaze_network() -> Generator[None]:
         autospec=True,
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_coordinator_unit_test_timers(request, monkeypatch) -> Generator[None]:
+    """Avoid real timers in coordinator tests that call internals without unloading."""
+    if request.node.path.name != "test_coordinator.py":
+        yield
+        return
+
+    def noop_tracker(*_args, **_kwargs) -> Callable[[], None]:
+        return lambda: None
+
+    monkeypatch.setattr(
+        "custom_components.tv_show_monitor.coordinator.async_track_point_in_time",
+        noop_tracker,
+    )
+    monkeypatch.setattr(
+        "custom_components.tv_show_monitor.coordinator.async_track_time_change",
+        noop_tracker,
+    )
+    yield
 
 
 @pytest.fixture
