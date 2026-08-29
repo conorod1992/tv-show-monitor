@@ -48,14 +48,17 @@ async def test_episode_today_fires_once_when_episode_is_today(hass, severance, e
     events = []
     hass.bus.async_listen(EVENT_EPISODE_TODAY, events.append)
 
-    await coordinator._async_update_data()
-    await coordinator._async_update_data()
-    await hass.async_block_till_done()
+    try:
+        await coordinator._async_update_data()
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
 
-    assert len(events) == 1
-    assert events[0].data["show_name"] == "Severance"
-    assert events[0].data["episode_id"] == today_episode.episode_id
-    assert events[0].data["episode_code"] == "S02E04"
+        assert len(events) == 1
+        assert events[0].data["show_name"] == "Severance"
+        assert events[0].data["episode_id"] == today_episode.episode_id
+        assert events[0].data["episode_code"] == "S02E04"
+    finally:
+        await coordinator.async_shutdown()
 
 
 async def test_episode_airing_fires_once(hass, severance, episode):

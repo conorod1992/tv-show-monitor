@@ -50,4 +50,20 @@ def test_viewer_exposes_clear_timing_sections() -> None:
     assert 'this._section("Recent", recent)' in panel
     assert "<strong>Tomorrow</strong>" in panel
     assert "this._hass?.config?.time_zone" in panel
-    assert 'hasEpisode ? this._friendlyAiring(airing, attr) : ""' in panel
+    assert 'hasEpisode ? this._friendlyAiring(airing, whenAttr) : ""' in panel
+
+
+def test_recent_section_uses_previous_episode_data() -> None:
+    panel = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "tv_show_monitor"
+        / "frontend"
+        / "tv-show-monitor-panel.js"
+    ).read_text(encoding="utf-8")
+
+    assert ".map((show) => this._recentFromShow(show))" in panel
+    assert "attr.previous_air_stamp" in panel
+    assert "attr.previous_episode_code" in panel
+    assert "attr.previous_episode_name" in panel
+    assert "dayDifference !== 0 && dayDifference !== -1" in panel
