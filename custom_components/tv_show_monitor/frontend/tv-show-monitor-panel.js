@@ -35,7 +35,10 @@ class TVShowMonitorPanel extends HTMLElement {
 
     const today = shows.filter((show) => show.group === "today");
     const upcoming = shows.filter((show) => show.group === "upcoming");
-    const recent = shows.filter((show) => show.group === "recent").reverse();
+    const recent = shows
+      .map((show) => this._recentFromShow(show))
+      .filter((show) => show !== null)
+      .sort((a, b) => b.airing.getTime() - a.airing.getTime() || a.name.localeCompare(b.name));
     const unscheduled = shows.filter((show) => show.group === "unscheduled");
     const ended = shows.filter((show) => show.group === "ended");
 
@@ -97,6 +100,26 @@ class TVShowMonitorPanel extends HTMLElement {
       group,
       name: attr.show_name || state.attributes.friendly_name || entityId,
       hasEpisode,
+      recentEpisode: false,
+    };
+  }
+
+  _recentFromShow(show) {
+    const { attr } = show;
+    if (attr.previous_episode_id === undefined || !attr.previous_air_stamp) return null;
+
+    const airing = this._dateFromStamp(attr.previous_air_stamp);
+    if (!airing) return null;
+
+    const dayDifference = this._dayDifference(this._dateKey(new Date()), this._dateKey(airing));
+    if (dayDifference !== 0 && dayDifference !== -1) return null;
+
+    return {
+      ...show,
+      airing,
+      group: "recent",
+      hasEpisode: true,
+      recentEpisode: true,
     };
   }
 
@@ -111,18 +134,22 @@ class TVShowMonitorPanel extends HTMLElement {
   }
 
   _card(show) {
-    const { attr, airing, hasEpisode } = show;
+    const { attr, airing, hasEpisode, recentEpisode } = show;
     const picture = this._safeUrl(attr.entity_picture);
     const channel = attr.web_channel || attr.network;
-    const episodeCode = attr.episode_code || "";
-    const episodeName = attr.episode_name || "";
+    const episodeCode = recentEpisode ? attr.previous_episode_code || "" : attr.episode_code || "";
+    const episodeName = recentEpisode ? attr.previous_episode_name || "" : attr.episode_name || "";
     const titleLine = hasEpisode
-      ? [episodeCode, episodeName].filter(Boolean).join(" · ") || "Next episode"
+      ? [episodeCode, episodeName].filter(Boolean).join(" · ") || (recentEpisode ? "Previous episode" : "Next episode")
       : this._noEpisodeText(attr.show_status, show.state.state);
-    const when = hasEpisode ? this._friendlyAiring(airing, attr) : "";
+    const whenAttr = recentEpisode
+      ? { air_date: attr.previous_air_date, air_time: attr.previous_air_time }
+      : attr;
+    const when = hasEpisode ? this._friendlyAiring(airing, whenAttr) : "";
     const finalEpisode = show.group === "ended" && attr.final_episode_code
       ? `Final episode: ${attr.final_episode_code}${attr.final_episode_name ? ` · ${attr.final_episode_name}` : ""}`
       : "";
+    const runtime = recentEpisode ? null : attr.runtime;
 
     return `
       <article class="card" data-entity-id="${this._escapeAttr(show.entityId)}" tabindex="0" role="button" aria-label="Open ${this._escapeAttr(show.name)} details">
@@ -135,7 +162,7 @@ class TVShowMonitorPanel extends HTMLElement {
           ${when ? `<div class="detail">${when}</div>` : ""}
           ${channel ? `<div class="detail">${this._escape(channel)}</div>` : ""}
           ${finalEpisode ? `<div class="detail muted">${this._escape(finalEpisode)}</div>` : ""}
-          ${attr.runtime ? `<div class="detail muted">${this._escape(String(attr.runtime))} min</div>` : ""}
+          ${runtime ? `<div class="detail muted">${this._escape(String(runtime))} min</div>` : ""}
         </div>
       </article>
     `;
@@ -212,10 +239,14 @@ class TVShowMonitorPanel extends HTMLElement {
     return "No upcoming episode yet";
   }
 
-  _airingDate(attr) {
-    if (!attr.air_stamp) return null;
-    const value = new Date(attr.air_stamp);
+  _dateFromStamp(stamp) {
+    if (!stamp) return null;
+    const value = new Date(stamp);
     return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  _airingDate(attr) {
+    return this._dateFromStamp(attr.air_stamp);
   }
 
   _sortValue(show) {
