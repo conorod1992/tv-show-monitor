@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
@@ -9,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 
 from .api import TVMazeClient
 from .const import (
@@ -17,11 +19,15 @@ from .const import (
     DEFAULT_POLL_INTERVAL_HOURS,
     DOMAIN,
     PLATFORMS,
+    STORAGE_KEY_PREFIX,
+    STORAGE_VERSION,
     ConfiguredShow,
 )
 from .coordinator import TVShowMonitorCoordinator
-from .frontend import async_register_frontend
+from .frontend import async_register_frontend, async_unregister_frontend
 from .repairs import async_delete_missing_show_issue
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -58,11 +64,45 @@ async def async_setup_entry(
 async def async_unload_entry(
     hass: HomeAssistant, entry: TVShowMonitorConfigEntry
 ) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry and its process-local frontend panel."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        await entry.runtime_data.coordinator.async_shutdown()
+        try:
+            await entry.runtime_data.coordinator.async_shutdown()
+        finally:
+            async_unregister_frontend(hass)
     return unloaded
+
+
+async def async_remove_entry(
+    hass: HomeAssistant, entry: TVShowMonitorConfigEntry
+) -> None:
+    """Remove persistent state and repair issues owned by a deleted entry."""
+    async_unregister_frontend(hass)
+
+    store: Store[dict[str, object]] = Store(
+        hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}.{entry.entry_id}"
+    )
+    try:
+        await store.async_remove()
+    except Exception as err:  # Removal should not strand the config entry.
+        _LOGGER.warning(
+            "Unable to remove TV Show Monitor persistent state for entry %s: %s",
+            entry.entry_id,
+            err,
+        )
+
+    raw_shows = entry.options.get(CONF_SHOWS, entry.data.get(CONF_SHOWS, []))
+    if not isinstance(raw_shows, list):
+        return
+    for item in raw_shows:
+        if not isinstance(item, dict):
+            continue
+        try:
+            tvmaze_id = int(item["tvmaze_id"])
+        except KeyError, TypeError, ValueError:
+            continue
+        async_delete_missing_show_issue(hass, entry.entry_id, tvmaze_id)
 
 
 async def _async_remove_obsolete_registry_entries(
