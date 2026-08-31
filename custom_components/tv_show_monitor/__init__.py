@@ -100,7 +100,7 @@ async def async_remove_entry(
             continue
         try:
             tvmaze_id = int(item["tvmaze_id"])
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             continue
         async_delete_missing_show_issue(hass, entry.entry_id, tvmaze_id)
 
