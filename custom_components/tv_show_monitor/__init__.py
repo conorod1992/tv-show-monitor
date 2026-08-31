@@ -45,6 +45,8 @@ async def async_setup_entry(
 ) -> bool:
     """Set up TV Show Monitor from a config entry."""
     await async_register_frontend(hass)
+    entry.async_on_unload(lambda: async_unregister_frontend(hass))
+
     raw_shows = entry.options.get(CONF_SHOWS, entry.data[CONF_SHOWS])
     shows = tuple(ConfiguredShow.from_dict(item) for item in raw_shows)
     await _async_remove_obsolete_registry_entries(hass, entry, shows)
@@ -55,6 +57,7 @@ async def async_setup_entry(
         int(entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_HOURS)),
         entry,
     )
+    entry.async_on_unload(coordinator.async_shutdown)
     entry.runtime_data = TVShowMonitorRuntimeData(coordinator)
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -64,14 +67,8 @@ async def async_setup_entry(
 async def async_unload_entry(
     hass: HomeAssistant, entry: TVShowMonitorConfigEntry
 ) -> bool:
-    """Unload a config entry and its process-local frontend panel."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unloaded:
-        try:
-            await entry.runtime_data.coordinator.async_shutdown()
-        finally:
-            async_unregister_frontend(hass)
-    return unloaded
+    """Unload a config entry."""
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 async def async_remove_entry(
