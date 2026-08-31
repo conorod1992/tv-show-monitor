@@ -345,9 +345,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             self.hass, _handle_airing, airing
         )
 
-    def _fire_episode_airing_if_current(
-        self, show: ConfiguredShow, key: str
-    ) -> bool:
+    def _fire_episode_airing_if_current(self, show: ConfiguredShow, key: str) -> bool:
         """Fire an airing event once if the keyed episode is still current."""
         state = self._states.get(show.tvmaze_id)
         if state is None or state.episode is None:
