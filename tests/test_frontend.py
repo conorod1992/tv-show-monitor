@@ -8,32 +8,76 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from custom_components.tv_show_monitor.frontend import (
     PANEL_URL_PATH,
     async_register_frontend,
+    async_unregister_frontend,
 )
 
 
-async def test_frontend_panel_starts_hidden_from_sidebar(hass):
+async def test_frontend_panel_starts_hidden_and_can_be_reregistered(hass):
+    http = MagicMock()
+    http.async_register_static_paths = AsyncMock()
+    panel_state = {"exists": False}
+
+    def panel_exists(*_args):
+        return panel_state["exists"]
+
+    def register_panel(*_args, **_kwargs):
+        panel_state["exists"] = True
+
+    def remove_panel(*_args, **_kwargs):
+        panel_state["exists"] = False
+
+    with (
+        patch.object(hass, "http", http),
+        patch(
+            "custom_components.tv_show_monitor.frontend.frontend.async_panel_exists",
+            side_effect=panel_exists,
+        ),
+        patch(
+            "custom_components.tv_show_monitor.frontend.frontend.async_register_built_in_panel",
+            side_effect=register_panel,
+        ) as register,
+        patch(
+            "custom_components.tv_show_monitor.frontend.frontend.async_remove_panel",
+            side_effect=remove_panel,
+        ) as remove,
+    ):
+        await async_register_frontend(hass)
+        await async_register_frontend(hass)
+        async_unregister_frontend(hass)
+        await async_register_frontend(hass)
+
+    http.async_register_static_paths.assert_awaited_once()
+    assert register.call_count == 2
+    remove.assert_called_once_with(hass, PANEL_URL_PATH, warn_if_unknown=False)
+    kwargs = register.call_args.kwargs
+    assert kwargs["frontend_url_path"] == PANEL_URL_PATH
+    assert kwargs["sidebar_default_visible"] is False
+    assert kwargs["show_in_sidebar"] is True
+    assert kwargs["require_admin"] is False
+
+
+async def test_frontend_does_not_remove_panel_it_did_not_register(hass):
     http = MagicMock()
     http.async_register_static_paths = AsyncMock()
     with (
         patch.object(hass, "http", http),
         patch(
             "custom_components.tv_show_monitor.frontend.frontend.async_panel_exists",
-            return_value=False,
+            return_value=True,
         ),
         patch(
             "custom_components.tv_show_monitor.frontend.frontend.async_register_built_in_panel"
         ) as register,
+        patch(
+            "custom_components.tv_show_monitor.frontend.frontend.async_remove_panel"
+        ) as remove,
     ):
         await async_register_frontend(hass)
-        await async_register_frontend(hass)
+        async_unregister_frontend(hass)
 
     http.async_register_static_paths.assert_awaited_once()
-    register.assert_called_once()
-    kwargs = register.call_args.kwargs
-    assert kwargs["frontend_url_path"] == PANEL_URL_PATH
-    assert kwargs["sidebar_default_visible"] is False
-    assert kwargs["show_in_sidebar"] is True
-    assert kwargs["require_admin"] is False
+    register.assert_not_called()
+    remove.assert_not_called()
 
 
 def test_viewer_exposes_clear_timing_sections() -> None:
