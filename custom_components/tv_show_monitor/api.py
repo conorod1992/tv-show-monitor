@@ -170,9 +170,7 @@ class TVMazeClient:
                     async with response:
                         if response.status == 429:
                             if attempt >= MAX_RETRIES:
-                                raise TVMazeRateLimitError(
-                                    "TVmaze rate limit exceeded"
-                                )
+                                raise TVMazeRateLimitError("TVmaze rate limit exceeded")
                             retry_delay = _retry_delay(response)
                             _LOGGER.warning(
                                 "TVmaze rate limited a request; retrying in %.1f seconds",
@@ -191,9 +189,7 @@ class TVMazeClient:
                         elif response.status == 404:
                             raise TVMazeNotFoundError("TVmaze resource not found")
                         elif response.status >= 400:
-                            raise TVMazeError(
-                                f"TVmaze returned HTTP {response.status}"
-                            )
+                            raise TVMazeError(f"TVmaze returned HTTP {response.status}")
                         else:
                             try:
                                 return await response.json()
