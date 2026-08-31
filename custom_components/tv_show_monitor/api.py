@@ -156,6 +156,7 @@ class TVMazeClient:
 
     async def _async_get(self, path: str, *, params: dict[str, str | list[str]]) -> Any:
         for attempt in range(MAX_RETRIES + 1):
+            retry_delay: float | None = None
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
                     response = await self._session.get(
@@ -168,42 +169,48 @@ class TVMazeClient:
                     )
                     async with response:
                         if response.status == 429:
-                            if attempt < MAX_RETRIES:
-                                delay = _retry_delay(response)
-                                _LOGGER.warning(
-                                    "TVmaze rate limited a request; retrying in %.1f seconds",
-                                    delay,
+                            if attempt >= MAX_RETRIES:
+                                raise TVMazeRateLimitError("TVmaze rate limit exceeded")
+                            retry_delay = _retry_delay(response)
+                            _LOGGER.warning(
+                                "TVmaze rate limited a request; retrying in %.1f seconds",
+                                retry_delay,
+                            )
+                        elif response.status in RETRYABLE_STATUSES:
+                            if attempt >= MAX_RETRIES:
+                                raise TVMazeError(
+                                    f"TVmaze returned HTTP {response.status}"
                                 )
-                                await asyncio.sleep(delay)
-                                continue
-                            raise TVMazeRateLimitError("TVmaze rate limit exceeded")
-                        if response.status in RETRYABLE_STATUSES:
-                            if attempt < MAX_RETRIES:
-                                _LOGGER.warning(
-                                    "TVmaze returned HTTP %s; retrying once",
-                                    response.status,
-                                )
-                                await asyncio.sleep(RETRY_DELAY)
-                                continue
-                            raise TVMazeError(f"TVmaze returned HTTP {response.status}")
-                        if response.status == 404:
+                            retry_delay = RETRY_DELAY
+                            _LOGGER.warning(
+                                "TVmaze returned HTTP %s; retrying once",
+                                response.status,
+                            )
+                        elif response.status == 404:
                             raise TVMazeNotFoundError("TVmaze resource not found")
-                        if response.status >= 400:
+                        elif response.status >= 400:
                             raise TVMazeError(f"TVmaze returned HTTP {response.status}")
-                        try:
-                            return await response.json()
-                        except (ValueError, TypeError) as err:
-                            raise TVMazeResponseError(
-                                "TVmaze returned invalid JSON"
-                            ) from err
+                        else:
+                            try:
+                                return await response.json()
+                            except (ValueError, TypeError) as err:
+                                raise TVMazeResponseError(
+                                    "TVmaze returned invalid JSON"
+                                ) from err
             except TimeoutError as err:
-                if attempt < MAX_RETRIES:
-                    _LOGGER.warning("TVmaze request timed out; retrying once")
-                    await asyncio.sleep(RETRY_DELAY)
-                    continue
-                raise TVMazeError("TVmaze request timed out") from err
+                if attempt >= MAX_RETRIES:
+                    raise TVMazeError("TVmaze request timed out") from err
+                _LOGGER.warning("TVmaze request timed out; retrying once")
+                retry_delay = RETRY_DELAY
             except ClientError as err:
-                raise TVMazeError("Unable to communicate with TVmaze") from err
+                if attempt >= MAX_RETRIES:
+                    raise TVMazeError("Unable to communicate with TVmaze") from err
+                _LOGGER.warning("TVmaze request failed; retrying once: %s", err)
+                retry_delay = RETRY_DELAY
+
+            if retry_delay is not None:
+                await asyncio.sleep(retry_delay)
+
         raise TVMazeRateLimitError("TVmaze rate limit exceeded")
 
 
