@@ -61,6 +61,7 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
         result = self.result
         state = result.state
         attributes: dict[str, Any] = {
+            "tv_show_monitor_entity": True,
             "tvmaze_show_id": result.show.tvmaze_id,
             "show_name": result.show.canonical_name,
             "show_url": result.show.show_url,

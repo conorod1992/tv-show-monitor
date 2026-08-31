@@ -4,14 +4,6 @@ TV Show Monitor is a UI-configured Home Assistant custom integration that checks
 [TVmaze](https://www.tvmaze.com/) for the next scheduled episode of each show you
 follow. It creates one sensor and one Home Assistant device per TV show.
 
-## Screenshots
-
-> Screenshots will be added after the first release.
-
-- Configuration flow — placeholder
-- TV Show Monitor viewer — placeholder
-- Show sensor and attributes — placeholder
-
 ## Installation
 
 ### HACS
@@ -55,12 +47,14 @@ The viewer groups followed shows into:
 
 - **Today**;
 - **Coming up**;
+- **Recent**, for episodes that aired today or yesterday;
 - **No episode scheduled**;
 - **Ended**.
 
 Each show card can display the poster, episode code and name, your local airing date
 and time, network or streaming service, runtime, and final-episode details where
-available. Click a card to open Home Assistant's normal entity details.
+available. Click a card, or focus it and press **Enter** or **Space**, to open Home
+Assistant's normal entity details.
 
 The viewer is available as a Home Assistant panel, but it is **hidden from the
 sidebar by default** to avoid adding clutter. Users who want quick access can choose
@@ -195,7 +189,7 @@ Shows are fetched independently with a small concurrency limit to avoid request
 bursts while preventing one slow request from serialising the entire refresh.
 Each show's single TVmaze request includes its main programme information plus the
 previous and next episode links when TVmaze has them. Transient timeouts, rate
-limits, and common server-side failures are retried once.
+limits, connection failures, and common server-side failures are retried once.
 
 Shows reported by TVmaze as `Ended` with no future episode are normally skipped once
 a successful ended-state result has been stored. They are rechecked every 30 days so

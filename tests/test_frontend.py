@@ -80,14 +80,18 @@ async def test_frontend_does_not_remove_panel_it_did_not_register(hass):
     remove.assert_not_called()
 
 
-def test_viewer_exposes_clear_timing_sections() -> None:
-    panel = (
+def _panel_source() -> str:
+    return (
         Path(__file__).parents[1]
         / "custom_components"
         / "tv_show_monitor"
         / "frontend"
         / "tv-show-monitor-panel.js"
     ).read_text(encoding="utf-8")
+
+
+def test_viewer_exposes_clear_timing_sections() -> None:
+    panel = _panel_source()
 
     assert 'this._section("Today", today)' in panel
     assert 'this._section("Coming up", upcoming)' in panel
@@ -98,16 +102,26 @@ def test_viewer_exposes_clear_timing_sections() -> None:
 
 
 def test_recent_section_uses_previous_episode_data() -> None:
-    panel = (
-        Path(__file__).parents[1]
-        / "custom_components"
-        / "tv_show_monitor"
-        / "frontend"
-        / "tv-show-monitor-panel.js"
-    ).read_text(encoding="utf-8")
+    panel = _panel_source()
 
     assert ".map((show) => this._recentFromShow(show))" in panel
     assert "attr.previous_air_stamp" in panel
     assert "attr.previous_episode_code" in panel
     assert "attr.previous_episode_name" in panel
     assert "dayDifference !== 0 && dayDifference !== -1" in panel
+
+
+def test_viewer_only_selects_integration_owned_entities() -> None:
+    panel = _panel_source()
+
+    assert "state.attributes?.tv_show_monitor_entity === true" in panel
+    assert "state.attributes?.tvmaze_show_id !== undefined" not in panel
+
+
+def test_viewer_cards_support_keyboard_activation() -> None:
+    panel = _panel_source()
+
+    assert 'element.addEventListener("keydown"' in panel
+    assert 'event.key !== "Enter" && event.key !== " "' in panel
+    assert "event.preventDefault();" in panel
+    assert "openDetails();" in panel

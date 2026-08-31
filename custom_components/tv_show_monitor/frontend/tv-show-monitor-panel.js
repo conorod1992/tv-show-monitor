@@ -28,7 +28,7 @@ class TVShowMonitorPanel extends HTMLElement {
     if (!this._hass) return;
 
     const shows = Object.entries(this._hass.states)
-      .filter(([, state]) => state.attributes?.tvmaze_show_id !== undefined)
+      .filter(([, state]) => state.attributes?.tv_show_monitor_entity === true)
       .map(([entityId, state]) => this._showFromState(entityId, state));
 
     shows.sort((a, b) => this._sortValue(a) - this._sortValue(b) || a.name.localeCompare(b.name));
@@ -59,7 +59,7 @@ class TVShowMonitorPanel extends HTMLElement {
     `;
 
     this.shadowRoot.querySelectorAll("[data-entity-id]").forEach((element) => {
-      element.addEventListener("click", () => {
+      const openDetails = () => {
         this.dispatchEvent(
           new CustomEvent("hass-more-info", {
             bubbles: true,
@@ -67,6 +67,13 @@ class TVShowMonitorPanel extends HTMLElement {
             detail: { entityId: element.dataset.entityId },
           })
         );
+      };
+
+      element.addEventListener("click", openDetails);
+      element.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openDetails();
       });
     });
   }
