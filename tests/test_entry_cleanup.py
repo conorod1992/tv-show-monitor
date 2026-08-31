@@ -28,7 +28,9 @@ async def test_unload_delegates_to_platforms():
 
     assert await async_unload_entry(hass, entry) is True
 
-    hass.config_entries.async_unload_platforms.assert_awaited_once_with(entry, PLATFORMS)
+    hass.config_entries.async_unload_platforms.assert_awaited_once_with(
+        entry, PLATFORMS
+    )
 
 
 async def test_setup_rollback_cleans_frontend_before_show_parsing(hass):
