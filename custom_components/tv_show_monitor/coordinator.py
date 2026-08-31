@@ -67,6 +67,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         self._store: Store[dict[str, object]] = Store(
             hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}.{config_entry.entry_id}"
         )
+        self._storage_writes_enabled = True
         self._cancel_day_listener: Callable[[], None] | None = None
         self._airing_listeners: dict[int, Callable[[], None]] = {}
 
@@ -75,7 +76,12 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         try:
             stored = await self._store.async_load() or {}
         except Exception as err:  # Storage backends can raise implementation errors.
-            _LOGGER.error("Unable to load TV Show Monitor persistent state: %s", err)
+            self._storage_writes_enabled = False
+            _LOGGER.error(
+                "Unable to load TV Show Monitor persistent state; persistent writes "
+                "are disabled until the integration is reloaded: %s",
+                err,
+            )
             self._ensure_day_listener()
             return
 
@@ -347,7 +353,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         await super().async_shutdown()
 
     async def _async_save(self) -> None:
-        """Atomically save all current states through Home Assistant's Store."""
+        """Atomically save current states when the persistent cache is trusted."""
+        if not self._storage_writes_enabled:
+            return
         try:
             await self._store.async_save(
                 {
