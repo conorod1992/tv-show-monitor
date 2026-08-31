@@ -474,10 +474,9 @@ def _episode_local_air_date(episode: EpisodeInfo, local_time_zone: str) -> str:
 
 
 def _episode_airing_key(episode: EpisodeInfo | None) -> str | None:
-    if episode is None:
+    if episode is None or not episode.air_stamp:
         return None
-    stamp = episode.air_stamp or f"{episode.air_date}T{episode.air_time or ''}"
-    return f"{episode.episode_id}:{stamp}"
+    return f"{episode.episode_id}:{episode.air_stamp}"
 
 
 def _episode_airing_datetime(
