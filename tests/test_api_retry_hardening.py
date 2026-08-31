@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from aiohttp import ClientConnectionError
-import pytest
 from unittest.mock import patch
+
+import pytest
+from aiohttp import ClientConnectionError
 
 from custom_components.tv_show_monitor.api import TVMazeClient, TVMazeError
 
