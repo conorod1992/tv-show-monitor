@@ -56,11 +56,15 @@ async def test_remove_entry_deletes_store_and_repair_issues(severance):
     store.async_remove = AsyncMock()
 
     with (
-        patch("custom_components.tv_show_monitor.Store", return_value=store) as store_cls,
+        patch(
+            "custom_components.tv_show_monitor.Store", return_value=store
+        ) as store_cls,
         patch(
             "custom_components.tv_show_monitor.async_delete_missing_show_issue"
         ) as delete_issue,
-        patch("custom_components.tv_show_monitor.async_unregister_frontend") as unregister,
+        patch(
+            "custom_components.tv_show_monitor.async_unregister_frontend"
+        ) as unregister,
     ):
         await async_remove_entry(hass, entry)
 
