@@ -48,14 +48,13 @@ async def test_setup_rollback_cleans_frontend_before_show_parsing(hass):
         patch(
             "custom_components.tv_show_monitor.async_unregister_frontend"
         ) as unregister,
-        pytest.raises(KeyError),
     ):
-        await async_setup_entry(hass, entry)
+        with pytest.raises(KeyError):
+            await async_setup_entry(hass, entry)
 
-    await entry._async_process_on_unload(hass)
-    await hass.async_block_till_done()
-
-    unregister.assert_called_once_with(hass)
+        await entry._async_process_on_unload(hass)
+        await hass.async_block_till_done()
+        unregister.assert_called_once_with(hass)
 
 
 async def test_setup_rollback_shuts_down_coordinator(hass, severance):
@@ -86,15 +85,14 @@ async def test_setup_rollback_shuts_down_coordinator(hass, severance):
             "custom_components.tv_show_monitor.TVShowMonitorCoordinator",
             return_value=coordinator,
         ),
-        pytest.raises(RuntimeError, match="setup failed"),
     ):
-        await async_setup_entry(hass, entry)
+        with pytest.raises(RuntimeError, match="setup failed"):
+            await async_setup_entry(hass, entry)
 
-    await entry._async_process_on_unload(hass)
-    await hass.async_block_till_done()
-
-    coordinator.async_shutdown.assert_awaited_once()
-    unregister.assert_called_once_with(hass)
+        await entry._async_process_on_unload(hass)
+        await hass.async_block_till_done()
+        coordinator.async_shutdown.assert_awaited_once()
+        unregister.assert_called_once_with(hass)
 
 
 async def test_remove_entry_deletes_store_and_repair_issues(severance):
