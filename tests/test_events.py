@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -85,6 +85,31 @@ async def test_episode_airing_fires_once(hass, severance, episode):
     assert len(events) == 1
     assert events[0].data["network"] == "Apple TV+"
     assert coordinator._states[216].episode_airing_fired_key == key
+
+
+def test_episode_airing_is_not_scheduled_without_absolute_timestamp(
+    hass, severance, episode
+):
+    local_time_only = replace(episode, air_stamp=None, air_time="20:00")
+    coordinator = make_coordinator(
+        hass,
+        severance,
+        ShowScheduleInfo("Running", local_time_only, None),
+    )
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True,
+        episode=local_time_only,
+        show_status="Running",
+    )
+
+    with patch(
+        "custom_components.tv_show_monitor.coordinator.async_track_point_in_time"
+    ) as track_point:
+        coordinator._schedule_airing_event(severance)
+
+    assert _episode_airing_key(local_time_only) is None
+    track_point.assert_not_called()
+    assert 216 not in coordinator._airing_listeners
 
 
 async def test_status_change_emits_event(hass, severance):
