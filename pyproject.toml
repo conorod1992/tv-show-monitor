@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tv-show-monitor"
-version = "1.2.0"
+version = "1.2.3"
 description = "A HACS-ready Home Assistant integration for upcoming TV episodes"
 requires-python = ">=3.14"
 license = "MIT"
