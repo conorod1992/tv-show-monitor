@@ -39,6 +39,7 @@ from .repairs import async_create_missing_show_issue, async_delete_missing_show_
 
 _LOGGER = logging.getLogger(__name__)
 MAX_CONCURRENT_REQUESTS = 5
+AIRING_EVENT_CATCH_UP_WINDOW = timedelta(hours=6)
 
 
 class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]]):
@@ -105,6 +106,8 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                             )
         self._ensure_day_listener()
         for show in self.shows:
+            self._fire_episode_today_if_due(show)
+            self._catch_up_episode_airing_if_due(show)
             self._schedule_airing_event(show)
         await self._async_save()
 
@@ -302,6 +305,22 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         self._states[show.tvmaze_id] = replace(state, episode_today_fired_key=key)
         return True
 
+    def _catch_up_episode_airing_if_due(self, show: ConfiguredShow) -> bool:
+        """Fire a recently missed exact airing event after restart."""
+        state = self._states.get(show.tvmaze_id)
+        if state is None or state.episode is None or state.episode.air_stamp is None:
+            return False
+        key = _episode_airing_key(state.episode)
+        if key is None or state.episode_airing_fired_key == key:
+            return False
+        airing = _episode_airing_datetime(state.episode, self.hass.config.time_zone)
+        if airing is None:
+            return False
+        now = datetime.now(UTC)
+        if airing > now or now - airing > AIRING_EVENT_CATCH_UP_WINDOW:
+            return False
+        return self._fire_episode_airing_if_current(show, key)
+
     def _schedule_airing_event(self, show: ConfiguredShow) -> None:
         """Schedule one exact callback for the show's next episode airing."""
         if cancel := self._airing_listeners.pop(show.tvmaze_id, None):
@@ -326,21 +345,26 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             self.hass, _handle_airing, airing
         )
 
-    async def _async_fire_episode_airing(self, show: ConfiguredShow, key: str) -> None:
-        """Fire an airing event if the scheduled episode is still current."""
+    def _fire_episode_airing_if_current(self, show: ConfiguredShow, key: str) -> bool:
+        """Fire an airing event once if the keyed episode is still current."""
         state = self._states.get(show.tvmaze_id)
         if state is None or state.episode is None:
-            return
+            return False
         if _episode_airing_key(state.episode) != key:
-            return
+            return False
         if state.episode_airing_fired_key == key:
-            return
+            return False
         self.hass.bus.async_fire(
             EVENT_EPISODE_AIRING,
             _episode_event_data(show, state, state.episode),
         )
         self._states[show.tvmaze_id] = replace(state, episode_airing_fired_key=key)
-        await self._async_save()
+        return True
+
+    async def _async_fire_episode_airing(self, show: ConfiguredShow, key: str) -> None:
+        """Fire an airing event if the scheduled episode is still current."""
+        if self._fire_episode_airing_if_current(show, key):
+            await self._async_save()
 
     async def async_shutdown(self) -> None:
         """Cancel integration-owned time listeners."""
