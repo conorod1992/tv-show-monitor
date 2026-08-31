@@ -48,6 +48,7 @@ def test_date_state_stable_identity_attributes_device_and_artwork(severance, epi
     assert sensor.native_value == "2026-10-12"
     assert sensor.unique_id == f"{DOMAIN}_216_next_episode"
     assert sensor.entity_picture == "https://static.tvmaze.test/severance-medium.jpg"
+    assert attributes["tv_show_monitor_entity"] is True
     assert attributes["episode_code"] == "S02E04"
     assert attributes["episode_name"] == episode.name
     assert attributes["show_status"] == "Running"
