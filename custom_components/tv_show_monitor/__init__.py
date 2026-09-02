@@ -26,6 +26,7 @@ from .const import (
 from .coordinator import TVShowMonitorCoordinator
 from .frontend import async_register_frontend, async_unregister_frontend
 from .repairs import async_delete_missing_show_issue
+from .websocket_api import async_register_websocket_api
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: TVShowMonitorConfigEntry
 ) -> bool:
     """Set up TV Show Monitor from a config entry."""
+    async_register_websocket_api(hass)
     await async_register_frontend(hass)
     entry.async_on_unload(lambda: async_unregister_frontend(hass))
 

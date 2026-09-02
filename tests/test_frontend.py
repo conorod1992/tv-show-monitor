@@ -125,3 +125,24 @@ def test_viewer_cards_support_keyboard_activation() -> None:
     assert 'event.key !== "Enter" && event.key !== " "' in panel
     assert "event.preventDefault();" in panel
     assert "openDetails();" in panel
+
+
+def test_viewer_management_is_admin_only_and_uses_websocket_api() -> None:
+    panel = _panel_source()
+
+    assert 'id="manage-shows"' in panel
+    assert "this._hass?.user?.is_admin === true" in panel
+    assert "type: `${DOMAIN}/config`" in panel
+    assert "type: `${DOMAIN}/search`" in panel
+    assert "type: `${DOMAIN}/add`" in panel
+    assert "type: `${DOMAIN}/remove`" in panel
+
+
+def test_management_dialog_survives_normal_state_rerenders() -> None:
+    panel = _panel_source()
+
+    assert "if (!this._initialized) this._renderShell();" in panel
+    assert 'const content = this.shadowRoot.querySelector("#content")' in panel
+    assert 'const host = this.shadowRoot.querySelector("#dialog-host")' in panel
+    assert "this.shadowRoot.innerHTML" in panel
+    assert "content.innerHTML" in panel

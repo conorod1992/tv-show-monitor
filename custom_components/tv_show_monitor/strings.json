@@ -104,7 +104,6 @@
       "show_not_found": "TVmaze could not find “{title}”. Check the title and try again.",
       "duplicate_resolved_show": "That TVmaze show is already being followed.",
       "cannot_connect": "Could not connect to TVmaze while resolving “{title}”. Try again later.",
-      "cannot_remove_last_show": "At least one show must remain configured.",
       "invalid_selection": "That selection is no longer available. Try again.",
       "poll_interval_too_short": "The polling interval cannot be shorter than 24 hours.",
       "poll_interval_too_long": "The polling interval cannot be longer than 744 hours.",

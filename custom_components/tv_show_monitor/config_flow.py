@@ -166,9 +166,13 @@ class TVShowMonitorOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Show the options management menu."""
         current = _entry_shows(self.config_entry)
+        menu_options = ["add_show"]
+        if current:
+            menu_options.extend(["remove_show", "change_match"])
+        menu_options.append("poll_interval")
         return self.async_show_menu(
             step_id="init",
-            menu_options=["add_show", "remove_show", "change_match", "poll_interval"],
+            menu_options=menu_options,
             description_placeholders={
                 "show_count": str(len(current)),
                 "poll_interval": str(_entry_poll_interval(self.config_entry)),
@@ -231,12 +235,8 @@ class TVShowMonitorOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Remove one followed show without resolving any titles."""
         current = _entry_shows(self.config_entry)
-        if len(current) <= 1:
-            return self.async_show_form(
-                step_id="remove_show",
-                data_schema=_show_choice_schema(current),
-                errors={"base": "cannot_remove_last_show"},
-            )
+        if not current:
+            return await self.async_step_init()
         if user_input is not None:
             show_id = int(user_input[CONF_SHOW_ID])
             if show_id not in {show.tvmaze_id for show in current}:
@@ -257,6 +257,8 @@ class TVShowMonitorOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Choose which configured show should be rematched."""
         current = _entry_shows(self.config_entry)
+        if not current:
+            return await self.async_step_init()
         if user_input is not None:
             show_id = int(user_input[CONF_SHOW_ID])
             if show_id not in {show.tvmaze_id for show in current}:

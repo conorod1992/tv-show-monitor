@@ -234,19 +234,32 @@ async def test_remove_show_does_not_search_tvmaze(hass, severance):
     search.assert_not_awaited()
 
 
-async def test_cannot_remove_last_show(hass, severance):
+async def test_can_remove_last_show_and_empty_menu_hides_invalid_actions(
+    hass, severance
+):
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_SHOWS: [severance.as_dict()]},
         options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
     )
     entry.add_to_hass(hass)
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "remove_show"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_SHOW_ID: "216"}
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SHOWS] == []
+
+    hass.config_entries.async_update_entry(entry, options=result["data"])
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "remove_show"}
-    )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "cannot_remove_last_show"
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == ["add_show", "poll_interval"]
 
 
 async def test_change_match_replaces_only_selected_show(hass, severance):
