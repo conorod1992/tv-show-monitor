@@ -55,7 +55,9 @@ def websocket_config(
     """Return the authoritative configured-show list for the viewer."""
     entry = _entry(hass)
     if entry is None:
-        connection.send_error(msg["id"], "not_configured", "TV Show Monitor is not configured")
+        connection.send_error(
+            msg["id"], "not_configured", "TV Show Monitor is not configured"
+        )
         return
     connection.send_result(msg["id"], _config_payload(entry))
 
@@ -76,7 +78,9 @@ async def websocket_search(
     """Search TVmaze for shows that can be added from the viewer."""
     entry = _entry(hass)
     if entry is None:
-        connection.send_error(msg["id"], "not_configured", "TV Show Monitor is not configured")
+        connection.send_error(
+            msg["id"], "not_configured", "TV Show Monitor is not configured"
+        )
         return
 
     query = msg["query"].strip()
@@ -122,7 +126,9 @@ async def websocket_add(
     """Validate and add a selected TVmaze search result."""
     entry = _entry(hass)
     if entry is None:
-        connection.send_error(msg["id"], "not_configured", "TV Show Monitor is not configured")
+        connection.send_error(
+            msg["id"], "not_configured", "TV Show Monitor is not configured"
+        )
         return
 
     current = _entry_shows(entry)
@@ -134,7 +140,9 @@ async def websocket_add(
 
     tvmaze_id = msg["tvmaze_id"]
     if tvmaze_id in {show.tvmaze_id for show in current}:
-        connection.send_error(msg["id"], "duplicate_show", "That show is already being monitored")
+        connection.send_error(
+            msg["id"], "duplicate_show", "That show is already being monitored"
+        )
         return
 
     query = msg["query"].strip()
@@ -147,7 +155,9 @@ async def websocket_add(
         candidates = await client.async_search_shows(query)
     except TVMazeError as err:
         _LOGGER.warning("Viewer TVmaze validation failed for %r: %s", query, err)
-        connection.send_error(msg["id"], "cannot_connect", "Unable to verify the TVmaze show")
+        connection.send_error(
+            msg["id"], "cannot_connect", "Unable to verify the TVmaze show"
+        )
         return
 
     candidate = next(
@@ -183,7 +193,9 @@ async def websocket_remove(
     """Remove a configured show, including the final remaining show."""
     entry = _entry(hass)
     if entry is None:
-        connection.send_error(msg["id"], "not_configured", "TV Show Monitor is not configured")
+        connection.send_error(
+            msg["id"], "not_configured", "TV Show Monitor is not configured"
+        )
         return
 
     current = _entry_shows(entry)
@@ -227,7 +239,9 @@ async def _async_replace_shows(
     try:
         return await hass.config_entries.async_reload(entry.entry_id)
     except Exception:  # Home Assistant owns reload failures; keep the saved options.
-        _LOGGER.exception("Unable to reload TV Show Monitor after updating followed shows")
+        _LOGGER.exception(
+            "Unable to reload TV Show Monitor after updating followed shows"
+        )
         return False
 
 
