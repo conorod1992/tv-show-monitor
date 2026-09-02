@@ -5,11 +5,22 @@ class TVShowMonitorPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._hass = null;
+    this._initialized = false;
+    this._manageOpen = false;
+    this._manageData = null;
+    this._manageBusy = false;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._searchQuery = "";
+    this._searchResults = null;
+    this._pendingRemoveId = null;
   }
 
   set hass(value) {
     this._hass = value;
-    this._render();
+    if (!this._initialized) this._renderShell();
+    this._renderContent();
+    this._syncAdminControls();
   }
 
   get hass() {
@@ -24,8 +35,27 @@ class TVShowMonitorPanel extends HTMLElement {
     this._narrow = value;
   }
 
-  _render() {
-    if (!this._hass) return;
+  _renderShell() {
+    this.shadowRoot.innerHTML = `
+      <style>${this._styles()}</style>
+      <div class="page">
+        <header>
+          <div class="header-copy">
+            <h1>TV Show Monitor</h1>
+            <p>See what is coming up, when it airs, and where to watch it.</p>
+          </div>
+          <button id="manage-shows" class="manage-button" type="button" hidden>Manage shows</button>
+        </header>
+        <div id="content"></div>
+      </div>
+      <div id="dialog-host"></div>
+    `;
+    this.shadowRoot.querySelector("#manage-shows").addEventListener("click", () => this._openManage());
+    this._initialized = true;
+  }
+
+  _renderContent() {
+    if (!this._hass || !this._initialized) return;
 
     const shows = Object.entries(this._hass.states)
       .filter(([, state]) => state.attributes?.tv_show_monitor_entity === true)
@@ -42,23 +72,17 @@ class TVShowMonitorPanel extends HTMLElement {
     const unscheduled = shows.filter((show) => show.group === "unscheduled");
     const ended = shows.filter((show) => show.group === "ended");
 
-    this.shadowRoot.innerHTML = `
-      <style>${this._styles()}</style>
-      <div class="page">
-        <header>
-          <h1>TV Show Monitor</h1>
-          <p>See what is coming up, when it airs, and where to watch it.</p>
-        </header>
-        ${shows.length === 0 ? this._emptyState() : ""}
-        ${this._section("Today", today)}
-        ${this._section("Coming up", upcoming)}
-        ${this._section("Recent", recent)}
-        ${this._section("No episode scheduled", unscheduled)}
-        ${this._section("Ended", ended)}
-      </div>
+    const content = this.shadowRoot.querySelector("#content");
+    content.innerHTML = `
+      ${shows.length === 0 ? this._emptyState() : ""}
+      ${this._section("Today", today)}
+      ${this._section("Coming up", upcoming)}
+      ${this._section("Recent", recent)}
+      ${this._section("No episode scheduled", unscheduled)}
+      ${this._section("Ended", ended)}
     `;
 
-    this.shadowRoot.querySelectorAll("[data-entity-id]").forEach((element) => {
+    content.querySelectorAll("[data-entity-id]").forEach((element) => {
       const openDetails = () => {
         this.dispatchEvent(
           new CustomEvent("hass-more-info", {
@@ -76,6 +100,263 @@ class TVShowMonitorPanel extends HTMLElement {
         openDetails();
       });
     });
+  }
+
+  _syncAdminControls() {
+    if (!this._initialized) return;
+    const isAdmin = this._hass?.user?.is_admin === true;
+    this.shadowRoot.querySelector("#manage-shows").hidden = !isAdmin;
+    if (!isAdmin && this._manageOpen) this._closeManage();
+  }
+
+  async _openManage() {
+    if (this._hass?.user?.is_admin !== true) return;
+    this._manageOpen = true;
+    this._manageData = null;
+    this._manageBusy = true;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._searchQuery = "";
+    this._searchResults = null;
+    this._pendingRemoveId = null;
+    this._renderManage();
+
+    try {
+      this._manageData = await this._hass.callWS({ type: `${DOMAIN}/config` });
+    } catch (error) {
+      this._manageError = this._errorText(error);
+    } finally {
+      this._manageBusy = false;
+      if (this._manageOpen) this._renderManage();
+    }
+  }
+
+  _closeManage() {
+    this._manageOpen = false;
+    this._manageData = null;
+    this._manageBusy = false;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._searchResults = null;
+    this._pendingRemoveId = null;
+    const host = this.shadowRoot.querySelector("#dialog-host");
+    if (host) host.innerHTML = "";
+  }
+
+  _renderManage() {
+    const host = this.shadowRoot.querySelector("#dialog-host");
+    if (!host || !this._manageOpen) return;
+
+    host.innerHTML = `
+      <div class="dialog-backdrop" id="manage-backdrop">
+        <div class="manage-dialog" role="dialog" aria-modal="true" aria-labelledby="manage-title">
+          <div class="dialog-header">
+            <div>
+              <h2 id="manage-title">Manage shows</h2>
+              <p>Add or remove followed shows without leaving the viewer.</p>
+            </div>
+            <button id="close-manage" class="icon-button" type="button" aria-label="Close">×</button>
+          </div>
+          <div class="dialog-body">
+            ${this._manageError ? `<div class="notice error">${this._escape(this._manageError)}</div>` : ""}
+            ${this._manageWarning ? `<div class="notice warning">${this._escape(this._manageWarning)}</div>` : ""}
+            ${this._manageData ? this._manageBody() : `<div class="loading">${this._manageBusy ? "Loading followed shows…" : "Unable to load followed shows."}</div>`}
+          </div>
+        </div>
+      </div>
+    `;
+
+    const backdrop = host.querySelector("#manage-backdrop");
+    host.querySelector("#close-manage").addEventListener("click", () => this._closeManage());
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) this._closeManage();
+    });
+    backdrop.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") this._closeManage();
+    });
+
+    const searchForm = host.querySelector("#show-search-form");
+    if (searchForm) searchForm.addEventListener("submit", (event) => this._searchShows(event));
+
+    host.querySelectorAll("[data-remove-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._pendingRemoveId = Number(button.dataset.removeId);
+        this._manageError = "";
+        this._renderManage();
+      });
+    });
+    host.querySelectorAll("[data-cancel-remove]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._pendingRemoveId = null;
+        this._renderManage();
+      });
+    });
+    host.querySelectorAll("[data-confirm-remove]").forEach((button) => {
+      button.addEventListener("click", () => this._removeShow(Number(button.dataset.confirmRemove)));
+    });
+    host.querySelectorAll("[data-add-id]").forEach((button) => {
+      button.addEventListener("click", () => this._addShow(Number(button.dataset.addId)));
+    });
+  }
+
+  _manageBody() {
+    const data = this._manageData;
+    const shows = data.shows || [];
+    const atLimit = shows.length >= data.max_shows;
+    return `
+      <section class="manage-section">
+        <div class="manage-section-heading">
+          <h3>Followed shows</h3>
+          <span>${shows.length} / ${data.max_shows}</span>
+        </div>
+        ${shows.length ? `<div class="manage-list">${shows.map((show) => this._manageShowRow(show)).join("")}</div>` : `<div class="inline-empty">No shows are currently being monitored.</div>`}
+      </section>
+      <section class="manage-section">
+        <h3>Add a show</h3>
+        <form id="show-search-form" class="search-form">
+          <input id="show-search" type="search" maxlength="100" autocomplete="off" placeholder="Search TVmaze by show title" value="${this._escapeAttr(this._searchQuery)}" ${this._manageBusy || atLimit ? "disabled" : ""}>
+          <button class="primary-button" type="submit" ${this._manageBusy || atLimit ? "disabled" : ""}>${this._manageBusy ? "Working…" : "Search"}</button>
+        </form>
+        ${atLimit ? `<div class="helper">You have reached the ${data.max_shows}-show limit.</div>` : ""}
+        ${this._searchResults === null ? "" : this._searchResultsMarkup()}
+      </section>
+    `;
+  }
+
+  _manageShowRow(show) {
+    const confirming = this._pendingRemoveId === Number(show.tvmaze_id);
+    const entered = show.entered_name && show.entered_name !== show.canonical_name
+      ? `<span class="row-meta">Matched from “${this._escape(show.entered_name)}”</span>`
+      : "";
+    if (confirming) {
+      return `
+        <div class="manage-row confirm-row">
+          <div class="row-copy">
+            <strong>Remove ${this._escape(show.canonical_name)}?</strong>
+            <span class="row-meta">Its TV Show Monitor sensor and device will be removed on reload.</span>
+          </div>
+          <div class="row-actions">
+            <button class="secondary-button" type="button" data-cancel-remove ${this._manageBusy ? "disabled" : ""}>Cancel</button>
+            <button class="danger-button" type="button" data-confirm-remove="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="manage-row">
+        <div class="row-copy">
+          <strong>${this._escape(show.canonical_name)}</strong>
+          ${entered}
+        </div>
+        <button class="text-button danger-text" type="button" data-remove-id="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+      </div>
+    `;
+  }
+
+  _searchResultsMarkup() {
+    if (!this._searchResults.length) {
+      return `<div class="inline-empty search-empty">No matching TVmaze shows found.</div>`;
+    }
+    return `<div class="search-results">${this._searchResults.map((candidate) => this._candidateRow(candidate)).join("")}</div>`;
+  }
+
+  _candidateRow(candidate) {
+    const details = [
+      candidate.premiered ? String(candidate.premiered).slice(0, 4) : null,
+      candidate.country,
+      candidate.network,
+      candidate.status,
+    ].filter(Boolean).join(" · ");
+    const alreadyAdded = candidate.already_added === true;
+    return `
+      <div class="candidate-row">
+        <div class="row-copy">
+          <strong>${this._escape(candidate.name)}</strong>
+          ${details ? `<span class="row-meta">${this._escape(details)}</span>` : ""}
+        </div>
+        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${alreadyAdded || this._manageBusy ? "disabled" : ""}>${alreadyAdded ? "Added" : "Add"}</button>
+      </div>
+    `;
+  }
+
+  async _searchShows(event) {
+    event.preventDefault();
+    const input = this.shadowRoot.querySelector("#show-search");
+    const query = input?.value?.trim() || "";
+    if (!query || this._manageBusy) return;
+
+    this._searchQuery = query;
+    this._manageBusy = true;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._searchResults = null;
+    this._renderManage();
+    try {
+      const result = await this._hass.callWS({ type: `${DOMAIN}/search`, query });
+      this._searchQuery = result.query;
+      this._searchResults = result.candidates || [];
+    } catch (error) {
+      this._manageError = this._errorText(error);
+      this._searchResults = [];
+    } finally {
+      this._manageBusy = false;
+      if (this._manageOpen) this._renderManage();
+    }
+  }
+
+  async _addShow(tvmazeId) {
+    if (this._manageBusy || !this._searchQuery) return;
+    this._manageBusy = true;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._renderManage();
+    try {
+      const result = await this._hass.callWS({
+        type: `${DOMAIN}/add`,
+        query: this._searchQuery,
+        tvmaze_id: tvmazeId,
+      });
+      this._manageData = result;
+      this._searchQuery = "";
+      this._searchResults = null;
+      this._pendingRemoveId = null;
+      if (result.reloaded === false) {
+        this._manageWarning = "The show was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
+      }
+    } catch (error) {
+      this._manageError = this._errorText(error);
+    } finally {
+      this._manageBusy = false;
+      if (this._manageOpen) this._renderManage();
+    }
+  }
+
+  async _removeShow(tvmazeId) {
+    if (this._manageBusy) return;
+    this._manageBusy = true;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._renderManage();
+    try {
+      const result = await this._hass.callWS({ type: `${DOMAIN}/remove`, tvmaze_id: tvmazeId });
+      this._manageData = result;
+      this._pendingRemoveId = null;
+      this._searchResults = null;
+      if (result.reloaded === false) {
+        this._manageWarning = "The removal was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
+      }
+    } catch (error) {
+      this._manageError = this._errorText(error);
+    } finally {
+      this._manageBusy = false;
+      if (this._manageOpen) this._renderManage();
+    }
+  }
+
+  _errorText(error) {
+    if (typeof error?.message === "string" && error.message) return error.message;
+    if (typeof error?.code === "string" && error.code) return error.code.replaceAll("_", " ");
+    return "Something went wrong while updating TV Show Monitor.";
   }
 
   _showFromState(entityId, state) {
@@ -133,7 +414,7 @@ class TVShowMonitorPanel extends HTMLElement {
   _section(title, shows) {
     if (!shows.length) return "";
     return `
-      <section>
+      <section class="viewer-section">
         <h2>${this._escape(title)}</h2>
         <div class="grid">${shows.map((show) => this._card(show)).join("")}</div>
       </section>
@@ -263,7 +544,10 @@ class TVShowMonitorPanel extends HTMLElement {
   }
 
   _emptyState() {
-    return `<div class="empty"><strong>No shows yet.</strong><span>Add shows from Settings → Devices & services → TV Show Monitor.</span></div>`;
+    const guidance = this._hass?.user?.is_admin === true
+      ? "Use Manage shows to add one."
+      : "Ask a Home Assistant administrator to add a show.";
+    return `<div class="empty"><strong>No shows yet.</strong><span>${this._escape(guidance)}</span></div>`;
   }
 
   _safeUrl(value) {
@@ -292,12 +576,19 @@ class TVShowMonitorPanel extends HTMLElement {
   _styles() {
     return `
       :host { display: block; min-height: 100%; background: var(--primary-background-color); color: var(--primary-text-color); }
-      .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; box-sizing: border-box; }
-      header { margin-bottom: 28px; }
+      * { box-sizing: border-box; }
+      button, input { font: inherit; }
+      button { color: inherit; }
+      .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+      header { margin-bottom: 28px; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+      .header-copy { min-width: 0; }
       h1 { margin: 0 0 6px; font-size: 28px; font-weight: 500; }
       header p { margin: 0; color: var(--secondary-text-color); font-size: 15px; }
-      section { margin-top: 28px; }
-      h2 { font-size: 18px; font-weight: 500; margin: 0 0 12px; }
+      .manage-button, .primary-button, .secondary-button, .danger-button, .text-button, .icon-button { border: 0; cursor: pointer; }
+      .manage-button { flex: 0 0 auto; padding: 9px 14px; border-radius: 10px; background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 600; }
+      .manage-button[hidden] { display: none; }
+      .viewer-section { margin-top: 28px; }
+      .viewer-section h2 { font-size: 18px; font-weight: 500; margin: 0 0 12px; }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
       .card { display: flex; min-height: 150px; overflow: hidden; border-radius: 14px; background: var(--card-background-color); box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,.12)); cursor: pointer; outline: none; }
       .card:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
@@ -311,12 +602,55 @@ class TVShowMonitorPanel extends HTMLElement {
       .muted { color: var(--secondary-text-color); }
       .empty { display: flex; flex-direction: column; gap: 4px; padding: 20px; border-radius: 12px; background: var(--card-background-color); }
       .empty span { color: var(--secondary-text-color); }
+      .dialog-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, .48); }
+      .manage-dialog { width: min(680px, 100%); max-height: min(760px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; background: var(--card-background-color); box-shadow: 0 18px 60px rgba(0,0,0,.28); }
+      .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px 16px; border-bottom: 1px solid var(--divider-color); }
+      .dialog-header h2 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+      .dialog-header p { margin: 0; color: var(--secondary-text-color); font-size: 14px; }
+      .icon-button { width: 36px; height: 36px; border-radius: 50%; background: transparent; font-size: 26px; line-height: 1; }
+      .icon-button:hover { background: var(--secondary-background-color); }
+      .dialog-body { min-height: 120px; padding: 20px 22px 24px; overflow-y: auto; }
+      .loading, .inline-empty, .helper { color: var(--secondary-text-color); font-size: 14px; }
+      .manage-section + .manage-section { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--divider-color); }
+      .manage-section h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+      .manage-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+      .manage-section-heading span { color: var(--secondary-text-color); font-size: 13px; }
+      .manage-list, .search-results { display: flex; flex-direction: column; gap: 8px; }
+      .manage-row, .candidate-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 54px; padding: 10px 12px; border: 1px solid var(--divider-color); border-radius: 11px; }
+      .confirm-row { align-items: flex-start; background: var(--secondary-background-color); }
+      .row-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+      .row-copy strong { font-size: 14px; line-height: 1.3; }
+      .row-meta { color: var(--secondary-text-color); font-size: 13px; line-height: 1.35; }
+      .row-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+      .search-form { display: flex; gap: 8px; }
+      .search-form input { min-width: 0; flex: 1 1 auto; height: 40px; padding: 0 11px; border: 1px solid var(--divider-color); border-radius: 9px; background: var(--primary-background-color); color: var(--primary-text-color); outline: none; }
+      .search-form input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
+      .primary-button, .secondary-button, .danger-button { flex: 0 0 auto; min-height: 38px; padding: 8px 13px; border-radius: 9px; font-weight: 600; }
+      .primary-button { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+      .secondary-button { background: var(--secondary-background-color); }
+      .danger-button { background: var(--error-color); color: #fff; }
+      .text-button { padding: 7px 4px; background: transparent; font-weight: 600; }
+      .danger-text { color: var(--error-color); }
+      button:disabled, input:disabled { opacity: .55; cursor: default; }
+      .search-results, .search-empty, .helper { margin-top: 12px; }
+      .notice { margin-bottom: 16px; padding: 10px 12px; border-radius: 9px; font-size: 14px; line-height: 1.4; background: var(--secondary-background-color); }
+      .error { color: var(--error-color); }
+      .warning { color: var(--warning-color, var(--primary-text-color)); }
       @media (max-width: 520px) {
         .page { padding: 18px 12px 36px; }
+        header { align-items: stretch; flex-direction: column; gap: 14px; }
+        .manage-button { align-self: flex-start; }
         .grid { grid-template-columns: 1fr; }
         .card { min-height: 135px; }
         .poster-wrap { width: 90px; flex-basis: 90px; }
         .poster { min-height: 135px; }
+        .dialog-backdrop { padding: 0; place-items: end center; }
+        .manage-dialog { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; }
+        .dialog-header, .dialog-body { padding-left: 16px; padding-right: 16px; }
+        .manage-row, .candidate-row { align-items: flex-start; }
+        .confirm-row { flex-direction: column; }
+        .search-form { flex-direction: column; }
+        .search-form .primary-button { align-self: flex-end; }
       }
     `;
   }
