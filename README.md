@@ -36,7 +36,9 @@ Open the integration's **Configure** dialog to manage shows through dedicated
 **Add show**, **Remove show**, and **Change TVmaze match** flows. Adding a show only
 searches the new title; removing a show performs no title lookup. Changing a match
 lets you search again and explicitly select the correct TVmaze result. Polling
-interval changes are handled separately and never rematch shows.
+interval changes are handled separately and never rematch shows. The final followed
+show may be removed; when the list is empty, Configure only offers actions that are
+valid for an empty monitor.
 
 ## TV Show Monitor viewer
 
@@ -55,6 +57,20 @@ Each show card can display the poster, episode code and name, your local airing 
 and time, network or streaming service, runtime, and final-episode details where
 available. Click a card, or focus it and press **Enter** or **Space**, to open Home
 Assistant's normal entity details.
+
+Home Assistant administrators also see a **Manage shows** button in the viewer. It
+opens a dedicated dialog that lists the current followed shows, lets you remove a
+show with confirmation, and searches TVmaze for shows to add. Search results show
+useful disambiguation details such as premiere year, country, network and status,
+and already-followed results are clearly disabled. Add/remove changes are written to
+the integration's normal config-entry options and applied through the same reload
+path used by the Configure flow, so entity/device cleanup and normal lifecycle
+handling remain consistent. Non-administrator users keep read-only access to the
+viewer and do not see the management control.
+
+The management dialog is kept separate from the programme-card rendering. Normal
+Home Assistant state updates can therefore refresh episode cards without closing an
+in-progress search or removal confirmation.
 
 The viewer is available as a Home Assistant panel, but it is **hidden from the
 sidebar by default** to avoid adding clutter. Users who want quick access can choose
@@ -232,8 +248,18 @@ TV Show Monitor is not affiliated with or endorsed by TVmaze.
 
 Remove TV Show Monitor from **Settings → Devices & services**. Then uninstall it
 through HACS (or delete `custom_components/tv_show_monitor` manually) and restart
-Home Assistant. Removing individual shows in options also removes their obsolete
-entity, device, and persisted cache entry during the reload.
+Home Assistant. Removing individual shows from either the viewer or Configure also
+removes their obsolete entity, device, repair issue and persisted cache entry during
+the integration reload.
+
+## Releasing
+
+Repository releases are created from **Actions → Release → Run workflow**. Enter the
+new `X.Y.Z` version once. The workflow verifies that the committed version still
+matches the latest published release, synchronises the Home Assistant manifest,
+`const.VERSION`, and `pyproject.toml`, commits that version bump to `main`, then
+creates the matching `vX.Y.Z` GitHub release with generated notes. Normal development
+should not pre-bump those version files; CI checks that all three remain aligned.
 
 ## Licence
 
