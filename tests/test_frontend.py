@@ -132,10 +132,10 @@ def test_viewer_management_is_admin_only_and_uses_websocket_api() -> None:
 
     assert 'id="manage-shows"' in panel
     assert "this._hass?.user?.is_admin === true" in panel
-    assert 'type: `${DOMAIN}/config`' in panel
-    assert 'type: `${DOMAIN}/search`' in panel
-    assert 'type: `${DOMAIN}/add`' in panel
-    assert 'type: `${DOMAIN}/remove`' in panel
+    assert "type: `${DOMAIN}/config`" in panel
+    assert "type: `${DOMAIN}/search`" in panel
+    assert "type: `${DOMAIN}/add`" in panel
+    assert "type: `${DOMAIN}/remove`" in panel
 
 
 def test_management_dialog_survives_normal_state_rerenders() -> None:
