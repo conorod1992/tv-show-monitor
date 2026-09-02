@@ -130,16 +130,14 @@ def main() -> None:
     if args.check:
         if args.version is not None:
             parser.error("--check does not accept a target version")
-        print(current_version())  # noqa: T201 - CLI output consumed by release workflow
+        print(current_version())
         return
     if args.version is None:
         parser.error("a target version is required unless --check is used")
 
     before = current_version()
     set_release_version(args.version)
-    print(  # noqa: T201 - explicit CLI status output
-        f"Staged release version {before} -> {args.version}"
-    )
+    print(f"Staged release version {before} -> {args.version}")
 
 
 if __name__ == "__main__":
