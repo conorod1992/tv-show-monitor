@@ -58,9 +58,7 @@ async def test_config_returns_authoritative_show_list(hass, hass_ws_client, seve
     assert response["result"]["max_shows"] == 50
 
 
-async def test_search_marks_already_configured_results(
-    hass, hass_ws_client, severance
-):
+async def test_search_marks_already_configured_results(hass, hass_ws_client, severance):
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_SHOWS: [severance.as_dict()]},
