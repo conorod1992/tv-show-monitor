@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
+from homeassistant.components.websocket_api.connection import ActiveConnection
+from homeassistant.components.websocket_api.decorators import (
+    async_response,
+    require_admin,
+    websocket_command,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -20,9 +26,6 @@ from .const import (
     MAX_SHOWS,
     ConfiguredShow,
 )
-
-if TYPE_CHECKING:
-    from homeassistant.components.websocket_api import ActiveConnection
 
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_websocket_api_registered"
@@ -45,8 +48,8 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
     hass.data[_REGISTERED] = True
 
 
-@websocket_api.require_admin
-@websocket_api.websocket_command({vol.Required("type"): WS_CONFIG})
+@require_admin
+@websocket_command({vol.Required("type"): WS_CONFIG})
 def websocket_config(
     hass: HomeAssistant,
     connection: ActiveConnection,
@@ -62,14 +65,14 @@ def websocket_config(
     connection.send_result(msg["id"], _config_payload(entry))
 
 
-@websocket_api.require_admin
-@websocket_api.websocket_command(
+@require_admin
+@websocket_command(
     {
         vol.Required("type"): WS_SEARCH,
         vol.Required("query"): vol.All(str, vol.Length(min=1, max=100)),
     }
 )
-@websocket_api.async_response
+@async_response
 async def websocket_search(
     hass: HomeAssistant,
     connection: ActiveConnection,
@@ -109,15 +112,15 @@ async def websocket_search(
     )
 
 
-@websocket_api.require_admin
-@websocket_api.websocket_command(
+@require_admin
+@websocket_command(
     {
         vol.Required("type"): WS_ADD,
         vol.Required("query"): vol.All(str, vol.Length(min=1, max=100)),
         vol.Required("tvmaze_id"): vol.All(vol.Coerce(int), vol.Range(min=1)),
     }
 )
-@websocket_api.async_response
+@async_response
 async def websocket_add(
     hass: HomeAssistant,
     connection: ActiveConnection,
@@ -177,14 +180,14 @@ async def websocket_add(
     connection.send_result(msg["id"], {**_config_payload(entry), "reloaded": reloaded})
 
 
-@websocket_api.require_admin
-@websocket_api.websocket_command(
+@require_admin
+@websocket_command(
     {
         vol.Required("type"): WS_REMOVE,
         vol.Required("tvmaze_id"): vol.All(vol.Coerce(int), vol.Range(min=1)),
     }
 )
-@websocket_api.async_response
+@async_response
 async def websocket_remove(
     hass: HomeAssistant,
     connection: ActiveConnection,
