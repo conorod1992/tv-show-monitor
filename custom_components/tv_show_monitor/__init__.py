@@ -12,7 +12,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
-from .api import TVMazeClient
 from .const import (
     CONF_POLL_INTERVAL,
     CONF_SHOWS,
@@ -25,6 +24,7 @@ from .const import (
 )
 from .coordinator import TVShowMonitorCoordinator
 from .frontend import async_register_frontend, async_unregister_frontend
+from .rate_limited_api import RateLimitedTVMazeClient
 from .repairs import async_delete_missing_show_issue
 from .websocket_api import async_register_websocket_api
 
@@ -54,7 +54,7 @@ async def async_setup_entry(
     await _async_remove_obsolete_registry_entries(hass, entry, shows)
     coordinator = TVShowMonitorCoordinator(
         hass,
-        TVMazeClient(async_get_clientsession(hass)),
+        RateLimitedTVMazeClient(async_get_clientsession(hass)),
         shows,
         int(entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_HOURS)),
         entry,
@@ -84,7 +84,7 @@ async def async_remove_entry(
     )
     try:
         await store.async_remove()
-    except Exception as err:  # Removal should not strand the config entry.
+    except Exception as err:  # Storage backends can raise implementation errors.
         _LOGGER.warning(
             "Unable to remove TV Show Monitor persistent state for entry %s: %s",
             entry.entry_id,
