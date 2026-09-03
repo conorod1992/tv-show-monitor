@@ -12,7 +12,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
-from .api import TVMazeClient
 from .const import (
     CONF_POLL_INTERVAL,
     CONF_SHOWS,
@@ -25,6 +24,7 @@ from .const import (
 )
 from .coordinator import TVShowMonitorCoordinator
 from .frontend import async_register_frontend, async_unregister_frontend
+from .rate_limited_api import RateLimitedTVMazeClient
 from .repairs import async_delete_missing_show_issue
 from .websocket_api import async_register_websocket_api
 
@@ -54,7 +54,7 @@ async def async_setup_entry(
     await _async_remove_obsolete_registry_entries(hass, entry, shows)
     coordinator = TVShowMonitorCoordinator(
         hass,
-        TVMazeClient(async_get_clientsession(hass)),
+        RateLimitedTVMazeClient(async_get_clientsession(hass)),
         shows,
         int(entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_HOURS)),
         entry,
@@ -99,7 +99,7 @@ async def async_remove_entry(
             continue
         try:
             tvmaze_id = int(item["tvmaze_id"])
-        except KeyError, TypeError, ValueError:
+        except (KeyError, TypeError, ValueError):
             continue
         async_delete_missing_show_issue(hass, entry.entry_id, tvmaze_id)
 
