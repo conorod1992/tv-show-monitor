@@ -84,7 +84,7 @@ async def async_remove_entry(
     )
     try:
         await store.async_remove()
-    except Exception as err:  # Removal should not strand the config entry.
+    except Exception as err:  # Storage backends can raise implementation errors.
         _LOGGER.warning(
             "Unable to remove TV Show Monitor persistent state for entry %s: %s",
             entry.entry_id,
@@ -99,7 +99,7 @@ async def async_remove_entry(
             continue
         try:
             tvmaze_id = int(item["tvmaze_id"])
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             continue
         async_delete_missing_show_issue(hass, entry.entry_id, tvmaze_id)
 
