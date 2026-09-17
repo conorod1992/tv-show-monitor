@@ -14,6 +14,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._manageScrollTop = 0;
   }
 
   set hass(value) {
@@ -119,6 +120,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._manageScrollTop = 0;
     this._renderManage();
 
     try {
@@ -139,6 +141,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageWarning = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._manageScrollTop = 0;
     const host = this.shadowRoot.querySelector("#dialog-host");
     if (host) host.innerHTML = "";
   }
@@ -146,6 +149,9 @@ class TVShowMonitorPanel extends HTMLElement {
   _renderManage() {
     const host = this.shadowRoot.querySelector("#dialog-host");
     if (!host || !this._manageOpen) return;
+
+    const previousBody = host.querySelector(".dialog-body");
+    if (previousBody) this._manageScrollTop = previousBody.scrollTop;
 
     host.innerHTML = `
       <div class="dialog-backdrop" id="manage-backdrop">
@@ -167,6 +173,8 @@ class TVShowMonitorPanel extends HTMLElement {
     `;
 
     const backdrop = host.querySelector("#manage-backdrop");
+    const dialogBody = host.querySelector(".dialog-body");
+    if (dialogBody) dialogBody.scrollTop = this._manageScrollTop;
     host.querySelector("#close-manage").addEventListener("click", () => this._closeManage());
     backdrop.addEventListener("click", (event) => {
       if (event.target === backdrop) this._closeManage();
