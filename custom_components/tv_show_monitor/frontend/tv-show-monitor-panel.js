@@ -14,6 +14,9 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._manageScrollTop = 0;
+    this._lastStableShows = null;
+    this._showMutationExpectedCount = null;
   }
 
   set hass(value) {
@@ -57,11 +60,24 @@ class TVShowMonitorPanel extends HTMLElement {
   _renderContent() {
     if (!this._hass || !this._initialized) return;
 
-    const shows = Object.entries(this._hass.states)
+    let shows = Object.entries(this._hass.states)
       .filter(([, state]) => state.attributes?.tv_show_monitor_entity === true)
       .map(([entityId, state]) => this._showFromState(entityId, state));
 
     shows.sort((a, b) => this._sortValue(a) - this._sortValue(b) || a.name.localeCompare(b.name));
+
+    let updating = false;
+    if (this._showMutationExpectedCount !== null) {
+      if (shows.length === this._showMutationExpectedCount) {
+        this._showMutationExpectedCount = null;
+        this._lastStableShows = shows;
+      } else {
+        updating = true;
+        if (this._lastStableShows !== null) shows = this._lastStableShows;
+      }
+    } else {
+      this._lastStableShows = shows;
+    }
 
     const today = shows.filter((show) => show.group === "today");
     const upcoming = shows.filter((show) => show.group === "upcoming");
@@ -80,6 +96,7 @@ class TVShowMonitorPanel extends HTMLElement {
       ${this._section("Recent", recent)}
       ${this._section("No episode scheduled", unscheduled)}
       ${this._section("Ended", ended)}
+      ${updating ? `<div class="viewer-updating" aria-live="polite"><span>Updating shows…</span></div>` : ""}
     `;
 
     content.querySelectorAll("[data-entity-id]").forEach((element) => {
@@ -102,6 +119,16 @@ class TVShowMonitorPanel extends HTMLElement {
     });
   }
 
+  _beginShowMutation(expectedCount) {
+    this._showMutationExpectedCount = Math.max(0, expectedCount);
+    this._renderContent();
+  }
+
+  _cancelShowMutation() {
+    this._showMutationExpectedCount = null;
+    this._renderContent();
+  }
+
   _syncAdminControls() {
     if (!this._initialized) return;
     const isAdmin = this._hass?.user?.is_admin === true;
@@ -119,6 +146,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._manageScrollTop = 0;
     this._renderManage();
 
     try {
@@ -139,6 +167,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageWarning = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._manageScrollTop = 0;
     const host = this.shadowRoot.querySelector("#dialog-host");
     if (host) host.innerHTML = "";
   }
@@ -146,6 +175,9 @@ class TVShowMonitorPanel extends HTMLElement {
   _renderManage() {
     const host = this.shadowRoot.querySelector("#dialog-host");
     if (!host || !this._manageOpen) return;
+
+    const previousBody = host.querySelector(".dialog-body");
+    if (previousBody) this._manageScrollTop = previousBody.scrollTop;
 
     host.innerHTML = `
       <div class="dialog-backdrop" id="manage-backdrop">
@@ -167,6 +199,8 @@ class TVShowMonitorPanel extends HTMLElement {
     `;
 
     const backdrop = host.querySelector("#manage-backdrop");
+    const dialogBody = host.querySelector(".dialog-body");
+    if (dialogBody) dialogBody.scrollTop = this._manageScrollTop;
     host.querySelector("#close-manage").addEventListener("click", () => this._closeManage());
     backdrop.addEventListener("click", (event) => {
       if (event.target === backdrop) this._closeManage();
@@ -306,6 +340,8 @@ class TVShowMonitorPanel extends HTMLElement {
 
   async _addShow(tvmazeId) {
     if (this._manageBusy || !this._searchQuery) return;
+    const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
+    this._beginShowMutation(currentCount + 1);
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -321,9 +357,13 @@ class TVShowMonitorPanel extends HTMLElement {
       this._searchResults = null;
       this._pendingRemoveId = null;
       if (result.reloaded === false) {
+        this._cancelShowMutation();
         this._manageWarning = "The show was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
+      } else {
+        this._renderContent();
       }
     } catch (error) {
+      this._cancelShowMutation();
       this._manageError = this._errorText(error);
     } finally {
       this._manageBusy = false;
@@ -333,6 +373,8 @@ class TVShowMonitorPanel extends HTMLElement {
 
   async _removeShow(tvmazeId) {
     if (this._manageBusy) return;
+    const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
+    this._beginShowMutation(currentCount - 1);
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -343,9 +385,13 @@ class TVShowMonitorPanel extends HTMLElement {
       this._pendingRemoveId = null;
       this._searchResults = null;
       if (result.reloaded === false) {
+        this._cancelShowMutation();
         this._manageWarning = "The removal was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
+      } else {
+        this._renderContent();
       }
     } catch (error) {
+      this._cancelShowMutation();
       this._manageError = this._errorText(error);
     } finally {
       this._manageBusy = false;
@@ -580,6 +626,7 @@ class TVShowMonitorPanel extends HTMLElement {
       button, input { font: inherit; }
       button { color: inherit; }
       .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+      #content { position: relative; }
       header { margin-bottom: 28px; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
       .header-copy { min-width: 0; }
       h1 { margin: 0 0 6px; font-size: 28px; font-weight: 500; }
@@ -602,6 +649,8 @@ class TVShowMonitorPanel extends HTMLElement {
       .muted { color: var(--secondary-text-color); }
       .empty { display: flex; flex-direction: column; gap: 4px; padding: 20px; border-radius: 12px; background: var(--card-background-color); }
       .empty span { color: var(--secondary-text-color); }
+      .viewer-updating { position: absolute; inset: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: flex-end; padding: 8px; border-radius: 12px; background: rgba(0, 0, 0, .06); pointer-events: none; }
+      .viewer-updating span { padding: 7px 10px; border-radius: 999px; background: var(--card-background-color); box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,.12)); color: var(--secondary-text-color); font-size: 13px; font-weight: 600; }
       .dialog-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, .48); }
       .manage-dialog { width: min(680px, 100%); max-height: min(760px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; background: var(--card-background-color); box-shadow: 0 18px 60px rgba(0,0,0,.28); }
       .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px 16px; border-bottom: 1px solid var(--divider-color); }
