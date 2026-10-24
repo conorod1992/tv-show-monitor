@@ -94,7 +94,7 @@ class TVShowMonitorPanel extends HTMLElement {
         (other.recentEpisode ? other.attr.previous_episode_id : other.attr.episode_id) ===
         (show.recentEpisode ? show.attr.previous_episode_id : show.attr.episode_id)
       ) === index)
-      .sort((a, b) => b.airing.getTime() - a.airing.getTime() || a.name.localeCompare(b.name));
+      .sort((a, b) => (b.airing?.getTime() ?? 0) - (a.airing?.getTime() ?? 0) || a.name.localeCompare(b.name));
     const unscheduled = shows.filter((show) => show.group === "unscheduled");
     const ended = shows.filter((show) => show.group === "ended");
 
