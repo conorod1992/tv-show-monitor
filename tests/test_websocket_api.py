@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from unittest.mock import AsyncMock, patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -128,3 +130,40 @@ async def test_remove_can_leave_an_empty_show_list(hass, hass_ws_client, severan
     assert response["result"]["shows"] == []
     assert entry.options[CONF_SHOWS] == []
     reload_entry.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_add_preserves_edits_made_while_search_was_pending(
+    hass, hass_ws_client, severance
+):
+    """A delayed add must not restore a show removed by another admin."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_search(query):
+        started.set()
+        await release.wait()
+        return [candidate(2, "Doctor Who")]
+
+    with (
+        patch.object(TVMazeClient, "async_search_shows", side_effect=slow_search),
+        patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
+    ):
+        await client.send_json_auto_id(
+            {"type": WS_ADD, "query": "Doctor Who", "tvmaze_id": 2}
+        )
+        await started.wait()
+        hass.config_entries.async_update_entry(
+            entry, options={CONF_SHOWS: [], CONF_POLL_INTERVAL: 24}
+        )
+        release.set()
+        response = await client.receive_json()
+
+    assert response["success"] is True
+    assert [show["tvmaze_id"] for show in entry.options[CONF_SHOWS]] == [2]
