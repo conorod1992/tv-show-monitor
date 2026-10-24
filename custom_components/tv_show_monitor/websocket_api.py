@@ -179,10 +179,14 @@ async def websocket_add(
     # the configuration in the meantime.
     current = _entry_shows(entry)
     if any(show.tvmaze_id == tvmaze_id for show in current):
-        connection.send_error(msg["id"], "duplicate_show", "That show is already being monitored")
+        connection.send_error(
+            msg["id"], "duplicate_show", "That show is already being monitored"
+        )
         return
     if len(current) >= MAX_SHOWS:
-        connection.send_error(msg["id"], "too_many_shows", f"A maximum of {MAX_SHOWS} shows is supported")
+        connection.send_error(
+            msg["id"], "too_many_shows", f"A maximum of {MAX_SHOWS} shows is supported"
+        )
         return
     shows = (*current, candidate.as_configured_show(query))
     reloaded = await _async_replace_shows(hass, entry, shows)
