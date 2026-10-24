@@ -175,6 +175,15 @@ async def websocket_add(
         )
         return
 
+    # Re-read after the network await; another management client may have edited
+    # the configuration in the meantime.
+    current = _entry_shows(entry)
+    if any(show.tvmaze_id == tvmaze_id for show in current):
+        connection.send_error(msg["id"], "duplicate_show", "That show is already being monitored")
+        return
+    if len(current) >= MAX_SHOWS:
+        connection.send_error(msg["id"], "too_many_shows", f"A maximum of {MAX_SHOWS} shows is supported")
+        return
     shows = (*current, candidate.as_configured_show(query))
     reloaded = await _async_replace_shows(hass, entry, shows)
     connection.send_result(msg["id"], {**_config_payload(entry), "reloaded": reloaded})
@@ -239,6 +248,8 @@ async def _async_replace_shows(
     options[CONF_SHOWS] = [show.as_dict() for show in shows]
     options[CONF_POLL_INTERVAL] = _entry_poll_interval(entry)
     hass.config_entries.async_update_entry(entry, options=options)
+    reload_key = f"{DOMAIN}_management_reload_{entry.entry_id}"
+    hass.data[reload_key] = True
     try:
         return await hass.config_entries.async_reload(entry.entry_id)
     except Exception:  # Home Assistant owns reload failures; keep the saved options.
@@ -246,6 +257,8 @@ async def _async_replace_shows(
             "Unable to reload TV Show Monitor after updating followed shows"
         )
         return False
+    finally:
+        hass.data.pop(reload_key, None)
 
 
 def _config_payload(entry: ConfigEntry) -> dict[str, Any]:
