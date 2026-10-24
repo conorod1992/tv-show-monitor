@@ -7,6 +7,8 @@ class TVShowMonitorPanel extends HTMLElement {
     this._hass = null;
     this._initialized = false;
     this._manageOpen = false;
+    this._manageGeneration++;
+    this._searchGeneration++;
     this._manageData = null;
     this._manageBusy = false;
     this._manageError = "";
@@ -17,6 +19,9 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageScrollTop = 0;
     this._lastStableShows = null;
     this._showMutationExpectedCount = null;
+    this._manageGeneration = 0;
+    this._searchGeneration = 0;
+    this._pendingAction = null;
   }
 
   set hass(value) {
@@ -139,6 +144,7 @@ class TVShowMonitorPanel extends HTMLElement {
   async _openManage() {
     if (this._hass?.user?.is_admin !== true) return;
     this._manageOpen = true;
+    const generation = ++this._manageGeneration;
     this._manageData = null;
     this._manageBusy = true;
     this._manageError = "";
@@ -150,12 +156,16 @@ class TVShowMonitorPanel extends HTMLElement {
     this._renderManage();
 
     try {
-      this._manageData = await this._hass.callWS({ type: `${DOMAIN}/config` });
+      const result = await this._hass.callWS({ type: `${DOMAIN}/config` });
+      if (generation !== this._manageGeneration) return;
+      this._manageData = result;
     } catch (error) {
-      this._manageError = this._errorText(error);
+      if (generation === this._manageGeneration) this._manageError = this._errorText(error);
     } finally {
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration) {
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
@@ -235,7 +245,9 @@ class TVShowMonitorPanel extends HTMLElement {
 
   _manageBody() {
     const data = this._manageData;
-    const shows = data.shows || [];
+    const shows = [...(data.shows || [])].sort((a, b) =>
+      a.canonical_name.localeCompare(b.canonical_name, undefined, { sensitivity: "base", numeric: true }) || Number(a.tvmaze_id) - Number(b.tvmaze_id)
+    );
     const atLimit = shows.length >= data.max_shows;
     return `
       <section class="manage-section">
@@ -271,7 +283,7 @@ class TVShowMonitorPanel extends HTMLElement {
           </div>
           <div class="row-actions">
             <button class="secondary-button" type="button" data-cancel-remove ${this._manageBusy ? "disabled" : ""}>Cancel</button>
-            <button class="danger-button" type="button" data-confirm-remove="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+            <button class="danger-button" type="button" data-confirm-remove="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>${this._pendingAction?.type === "remove" && this._pendingAction.id === Number(show.tvmaze_id) ? "Removing…" : "Remove"}</button>
           </div>
         </div>
       `;
@@ -308,7 +320,7 @@ class TVShowMonitorPanel extends HTMLElement {
           <strong>${this._escape(candidate.name)}</strong>
           ${details ? `<span class="row-meta">${this._escape(details)}</span>` : ""}
         </div>
-        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${alreadyAdded || this._manageBusy ? "disabled" : ""}>${alreadyAdded ? "Added" : "Add"}</button>
+        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${alreadyAdded || this._manageBusy ? "disabled" : ""}>${alreadyAdded ? "Added" : this._pendingAction?.type === "add" && this._pendingAction.id === Number(candidate.tvmaze_id) ? "Adding…" : "Add"}</button>
       </div>
     `;
   }
@@ -320,6 +332,8 @@ class TVShowMonitorPanel extends HTMLElement {
     if (!query || this._manageBusy) return;
 
     this._searchQuery = query;
+    const generation = this._manageGeneration;
+    const searchGeneration = ++this._searchGeneration;
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -327,14 +341,19 @@ class TVShowMonitorPanel extends HTMLElement {
     this._renderManage();
     try {
       const result = await this._hass.callWS({ type: `${DOMAIN}/search`, query });
+      if (generation !== this._manageGeneration || searchGeneration !== this._searchGeneration) return;
       this._searchQuery = result.query;
       this._searchResults = result.candidates || [];
     } catch (error) {
-      this._manageError = this._errorText(error);
-      this._searchResults = [];
+      if (generation === this._manageGeneration && searchGeneration === this._searchGeneration) {
+        this._manageError = this._errorText(error);
+        this._searchResults = [];
+      }
     } finally {
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration && searchGeneration === this._searchGeneration) {
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
@@ -342,6 +361,7 @@ class TVShowMonitorPanel extends HTMLElement {
     if (this._manageBusy || !this._searchQuery) return;
     const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
     this._beginShowMutation(currentCount + 1);
+    this._pendingAction = { type: "add", id: tvmazeId };
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -366,6 +386,7 @@ class TVShowMonitorPanel extends HTMLElement {
       this._cancelShowMutation();
       this._manageError = this._errorText(error);
     } finally {
+      this._pendingAction = null;
       this._manageBusy = false;
       if (this._manageOpen) this._renderManage();
     }
@@ -375,6 +396,7 @@ class TVShowMonitorPanel extends HTMLElement {
     if (this._manageBusy) return;
     const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
     this._beginShowMutation(currentCount - 1);
+    this._pendingAction = { type: "remove", id: tvmazeId };
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -394,6 +416,7 @@ class TVShowMonitorPanel extends HTMLElement {
       this._cancelShowMutation();
       this._manageError = this._errorText(error);
     } finally {
+      this._pendingAction = null;
       this._manageBusy = false;
       if (this._manageOpen) this._renderManage();
     }
