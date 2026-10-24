@@ -359,6 +359,8 @@ class TVShowMonitorOptionsFlow(OptionsFlowWithReload):
 
     def _finish_add(self, candidate: ShowSearchCandidate) -> ConfigFlowResult:
         current = _entry_shows(self.config_entry)
+        if len(current) >= MAX_SHOWS:
+            return self._candidate_form("add_select", {"base": "too_many_shows"})
         if candidate.tvmaze_id in {show.tvmaze_id for show in current}:
             return self._candidate_form(
                 "add_select", {"base": "duplicate_resolved_show"}
@@ -457,7 +459,7 @@ def _show_choice_schema(shows: tuple[ConfiguredShow, ...]) -> vol.Schema:
                         selector.SelectOptionDict(
                             value=str(show.tvmaze_id), label=show.canonical_name
                         )
-                        for show in shows
+                        for show in sorted(shows, key=lambda show: (show.canonical_name.casefold(), show.tvmaze_id))
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
