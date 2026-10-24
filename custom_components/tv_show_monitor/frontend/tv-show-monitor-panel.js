@@ -87,8 +87,13 @@ class TVShowMonitorPanel extends HTMLElement {
     const today = shows.filter((show) => show.group === "today");
     const upcoming = shows.filter((show) => show.group === "upcoming");
     const recent = shows
-      .map((show) => this._recentFromShow(show))
+      .flatMap((show) => [show.group === "recent" ? show : null, this._recentFromShow(show)])
       .filter((show) => show !== null)
+      .filter((show, index, array) => array.findIndex((other) =>
+        other.entityId === show.entityId &&
+        (other.recentEpisode ? other.attr.previous_episode_id : other.attr.episode_id) ===
+        (show.recentEpisode ? show.attr.previous_episode_id : show.attr.episode_id)
+      ) === index)
       .sort((a, b) => b.airing.getTime() - a.airing.getTime() || a.name.localeCompare(b.name));
     const unscheduled = shows.filter((show) => show.group === "unscheduled");
     const ended = shows.filter((show) => show.group === "ended");
@@ -380,6 +385,7 @@ class TVShowMonitorPanel extends HTMLElement {
         this._cancelShowMutation();
         this._manageWarning = "The show was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
+        this._showMutationExpectedCount = null;
         this._renderContent();
       }
     } catch (error) {
@@ -410,6 +416,7 @@ class TVShowMonitorPanel extends HTMLElement {
         this._cancelShowMutation();
         this._manageWarning = "The removal was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
+        this._showMutationExpectedCount = null;
         this._renderContent();
       }
     } catch (error) {
@@ -437,9 +444,7 @@ class TVShowMonitorPanel extends HTMLElement {
     const hasEpisode = attr.next_episode_found === true;
     let group = "unscheduled";
 
-    if (state.state === "Ended" || attr.show_status === "Ended") {
-      group = "ended";
-    } else if (hasEpisode && localDate === todayKey) {
+    if (hasEpisode && localDate === todayKey) {
       group = "today";
     } else if (hasEpisode && airing && airing < now) {
       group = "recent";
@@ -447,6 +452,8 @@ class TVShowMonitorPanel extends HTMLElement {
       group = "recent";
     } else if (hasEpisode) {
       group = "upcoming";
+    } else if (state.state === "Ended" || attr.show_status === "Ended") {
+      group = "ended";
     }
 
     return {
