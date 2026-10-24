@@ -104,7 +104,8 @@ def test_viewer_exposes_clear_timing_sections() -> None:
 def test_recent_section_uses_previous_episode_data() -> None:
     panel = _panel_source()
 
-    assert ".map((show) => this._recentFromShow(show))" in panel
+    assert "this._recentFromShow(show)" in panel
+    assert 'show.group === "recent" ? show : null' in panel
     assert "attr.previous_air_stamp" in panel
     assert "attr.previous_episode_code" in panel
     assert "attr.previous_episode_name" in panel
