@@ -314,7 +314,9 @@ async def test_concurrent_refreshes_are_deduplicated(hass, severance, episode):
     await coordinator.async_shutdown()
 
 
-async def test_management_reload_uses_cached_shows_without_network(hass, severance, episode):
+async def test_management_reload_uses_cached_shows_without_network(
+    hass, severance, episode
+):
     """Reloading after a list edit should only fetch new shows."""
     other = ConfiguredShow(2, "Doctor Who", "Doctor Who")
     coordinator = make_coordinator(hass, [severance, other], [episode])
