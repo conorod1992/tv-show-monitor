@@ -459,7 +459,13 @@ def _show_choice_schema(shows: tuple[ConfiguredShow, ...]) -> vol.Schema:
                         selector.SelectOptionDict(
                             value=str(show.tvmaze_id), label=show.canonical_name
                         )
-                        for show in sorted(shows, key=lambda show: (show.canonical_name.casefold(), show.tvmaze_id))
+                        for show in sorted(
+                            shows,
+                            key=lambda show: (
+                                show.canonical_name.casefold(),
+                                show.tvmaze_id,
+                            ),
+                        )
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
