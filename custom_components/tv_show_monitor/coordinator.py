@@ -52,6 +52,8 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         shows: tuple[ConfiguredShow, ...],
         poll_interval_hours: int,
         config_entry: ConfigEntry,
+        *,
+        skip_initial_unchanged: bool = False,
     ) -> None:
         super().__init__(
             hass,
@@ -64,6 +66,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         self.client = client
         self.shows = shows
         self._entry_id = config_entry.entry_id
+        self._skip_initial_unchanged = skip_initial_unchanged
         self._states: dict[int, LastKnownState] = {}
         self._store: Store[dict[str, object]] = Store(
             hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}.{config_entry.entry_id}"
@@ -115,6 +118,8 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         """Refresh due shows, preserving last-good state on errors."""
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
         now = datetime.now(UTC)
+        skip_cached = self._skip_initial_unchanged
+        self._skip_initial_unchanged = False
         await asyncio.gather(
             *(
                 self._async_refresh_show(show, semaphore, now)
@@ -122,6 +127,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                 if not _should_skip_ended_refresh(
                     self._states.get(show.tvmaze_id, LastKnownState()), now
                 )
+                and not (skip_cached and show.tvmaze_id in self._states)
             )
         )
         await self._async_save()
@@ -230,6 +236,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                             },
                         )
 
+                # An airing or midnight callback may have fired while the request
+                # was in flight. Preserve its marker from the latest state.
+                latest = self._states.get(show.tvmaze_id, previous)
                 today_key = _episode_today_key(
                     schedule.next_episode, self.hass.config.time_zone
                 )
@@ -250,13 +259,13 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     schedule_days=schedule.schedule_days,
                     schedule_time=schedule.schedule_time,
                     episode_today_fired_key=(
-                        previous.episode_today_fired_key
-                        if previous.episode_today_fired_key == today_key
+                        latest.episode_today_fired_key
+                        if latest.episode_today_fired_key == today_key
                         else None
                     ),
                     episode_airing_fired_key=(
-                        previous.episode_airing_fired_key
-                        if previous.episode_airing_fired_key == airing_key
+                        latest.episode_airing_fired_key
+                        if latest.episode_airing_fired_key == airing_key
                         else None
                     ),
                 )
@@ -281,6 +290,8 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         changed = False
         for show in self.shows:
             changed = self._fire_episode_today_if_due(show) or changed
+        # days_until is derived from the local date even without an API refresh.
+        self.async_update_listeners()
         if changed:
             self.hass.async_create_task(self._async_save())
 
