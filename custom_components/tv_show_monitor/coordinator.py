@@ -127,7 +127,10 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                 if not _should_skip_ended_refresh(
                     self._states.get(show.tvmaze_id, LastKnownState()), now
                 )
-                and not (skip_cached and show.tvmaze_id in self._states)
+                and not (
+                    skip_cached
+                    and self._states.get(show.tvmaze_id, LastKnownState()).has_successful_value
+                )
             )
         )
         await self._async_save()
