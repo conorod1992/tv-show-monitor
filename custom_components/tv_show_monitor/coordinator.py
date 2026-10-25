@@ -129,7 +129,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                 )
                 and not (
                     skip_cached
-                    and self._states.get(show.tvmaze_id, LastKnownState()).has_successful_value
+                    and self._states.get(
+                        show.tvmaze_id, LastKnownState()
+                    ).has_successful_value
                 )
             )
         )
