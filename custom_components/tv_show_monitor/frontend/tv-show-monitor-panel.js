@@ -22,6 +22,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageGeneration = 0;
     this._searchGeneration = 0;
     this._pendingAction = null;
+    this._dateFormatters = new Map();
   }
 
   set hass(value) {
@@ -192,6 +193,8 @@ class TVShowMonitorPanel extends HTMLElement {
     if (!host || !this._manageOpen) return;
 
     const previousBody = host.querySelector(".dialog-body");
+    const previousSearch = host.querySelector("#show-search");
+    if (previousSearch && !this._manageBusy) this._searchQuery = previousSearch.value;
     if (previousBody) this._manageScrollTop = previousBody.scrollTop;
 
     host.innerHTML = `
@@ -537,13 +540,7 @@ class TVShowMonitorPanel extends HTMLElement {
       return this._escape([attr.air_date, attr.air_time].filter(Boolean).join(" · "));
     }
 
-    const locale = this._hass.locale?.language || navigator.language;
-    const options = this._timeZone() ? { timeZone: this._timeZone() } : {};
-    const time = new Intl.DateTimeFormat(locale, {
-      ...options,
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(airing);
+    const time = this._dateFormatter("time").format(airing);
     const todayKey = this._dateKey(new Date());
     const airingKey = this._dateKey(airing);
     const dayDifference = this._dayDifference(todayKey, airingKey);
@@ -562,12 +559,7 @@ class TVShowMonitorPanel extends HTMLElement {
       return `Aired ${Math.abs(dayDifference)} days ago · ${this._escape(time)}`;
     }
 
-    const date = new Intl.DateTimeFormat(locale, {
-      ...options,
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-    }).format(airing);
+    const date = this._dateFormatter("shortDate").format(airing);
     return `${this._escape(date)} · ${this._escape(time)}`;
   }
 
@@ -575,15 +567,23 @@ class TVShowMonitorPanel extends HTMLElement {
     return this._hass?.config?.time_zone || undefined;
   }
 
+  _dateFormatter(kind) {
+    const zone = this._timeZone();
+    const locale = kind === "key" ? "en-CA" : (this._hass?.locale?.language || navigator.language);
+    const key = `${kind}:${locale}:${zone || "local"}`;
+    if (!this._dateFormatters.has(key)) {
+      const options = zone ? { timeZone: zone } : {};
+      if (kind === "key") Object.assign(options, { year: "numeric", month: "2-digit", day: "2-digit" });
+      else if (kind === "time") Object.assign(options, { hour: "numeric", minute: "2-digit" });
+      else Object.assign(options, { weekday: "short", day: "numeric", month: "short" });
+      this._dateFormatters.set(key, new Intl.DateTimeFormat(locale, options));
+    }
+    return this._dateFormatters.get(key);
+  }
+
   _dateKey(value) {
-    const formatter = new Intl.DateTimeFormat("en-CA", {
-      ...(this._timeZone() ? { timeZone: this._timeZone() } : {}),
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
     const parts = Object.fromEntries(
-      formatter.formatToParts(value).map((part) => [part.type, part.value])
+      this._dateFormatter("key").formatToParts(value).map((part) => [part.type, part.value])
     );
     return `${parts.year}-${parts.month}-${parts.day}`;
   }
