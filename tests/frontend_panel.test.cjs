@@ -1,0 +1,56 @@
+"use strict";
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const source = fs.readFileSync(
+  "custom_components/tv_show_monitor/frontend/tv-show-monitor-panel.js", "utf8"
+);
+let Panel;
+class Element {
+  attachShadow() {
+    this.shadowRoot = { innerHTML: "" };
+  }
+}
+const context = {
+  HTMLElement: Element,
+  customElements: {
+    get: () => undefined,
+    define: (_name, ctor) => { Panel = ctor; },
+  },
+  navigator: { language: "en-IE" },
+  Intl,
+  Date,
+};
+vm.runInNewContext(source, context, { filename: "tv-show-monitor-panel.js" });
+assert.ok(Panel, "panel registered as custom element");
+const panel = new Panel();
+panel._hass = { config: { time_zone: "Europe/Dublin" }, locale: { language: "en-IE" } };
+
+function showState(name, stamp, status = "Running") {
+  return {
+    state: stamp ? stamp.slice(0, 10) : status,
+    attributes: {
+      tv_show_monitor_entity: true,
+      show_name: name,
+      show_status: status,
+      next_episode_found: Boolean(stamp),
+      episode_id: 123,
+      air_stamp: stamp,
+      air_date: stamp?.slice(0, 10),
+    },
+  };
+}
+const future = new Date(Date.now() + 5 * 86400000).toISOString();
+const past = new Date(Date.now() - 5 * 86400000).toISOString();
+const futureEnded = panel._showFromState("sensor.future", showState("Finale", future, "Ended"));
+assert.equal(futureEnded.group, "upcoming", "upcoming finale remains scheduled");
+const pastRunning = panel._showFromState("sensor.past", showState("Delayed poll", past));
+assert.equal(pastRunning.group, "recent", "elapsed cached episode is recognised");
+const ended = panel._showFromState("sensor.ended", showState("Finished", null, "Ended"));
+assert.equal(ended.group, "ended", "ended without next episode stays ended");
+const first = panel._dateFormatter("key");
+assert.equal(first, panel._dateFormatter("key"), "same formatter reused");
+panel._hass.config.time_zone = "UTC";
+assert.notEqual(first, panel._dateFormatter("key"), "timezone change invalidates formatter key");
+console.log("Frontend behaviour checks passed");
