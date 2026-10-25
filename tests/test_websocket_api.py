@@ -209,7 +209,9 @@ async def test_management_reload_failure_keeps_saved_changes_but_clears_flag(
     key = f"{DOMAIN}_management_reload_{entry.entry_id}"
 
     with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(side_effect=RuntimeError("unload failed"))
+        hass.config_entries,
+        "async_reload",
+        AsyncMock(side_effect=RuntimeError("unload failed")),
     ):
         await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 216})
         response = await client.receive_json()
