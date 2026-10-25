@@ -156,7 +156,10 @@ def test_date_formatters_are_reused_across_render_updates() -> None:
     assert 'this._dateFormatter("key").formatToParts(value)' in panel
     assert 'this._dateFormatter("time").format(airing)' in panel
     assert 'this._dateFormatter("shortDate").format(airing)' in panel
-    assert "this._dateFormatters.set(key, new Intl.DateTimeFormat(locale, options))" in panel
+    assert (
+        "this._dateFormatters.set(key, new Intl.DateTimeFormat(locale, options))"
+        in panel
+    )
 
 
 def test_unsubmitted_search_text_survives_dialog_rebuild() -> None:
