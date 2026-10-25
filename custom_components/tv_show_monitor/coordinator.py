@@ -275,6 +275,10 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     ),
                 )
                 self._fire_episode_today_if_due(show)
+                # Newly discovered broadcasts can already be airing by the time
+                # the request finishes. Apply the same bounded catch-up used
+                # after an integration restart.
+                self._catch_up_episode_airing_if_due(show)
                 self._schedule_airing_event(show)
 
     def _ensure_day_listener(self) -> None:
