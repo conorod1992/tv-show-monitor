@@ -7,8 +7,6 @@ class TVShowMonitorPanel extends HTMLElement {
     this._hass = null;
     this._initialized = false;
     this._manageOpen = false;
-    this._manageGeneration++;
-    this._searchGeneration++;
     this._manageData = null;
     this._manageBusy = false;
     this._manageError = "";
@@ -23,13 +21,41 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchGeneration = 0;
     this._pendingAction = null;
     this._dateFormatters = new Map();
+    this._renderedStates = null;
+    this._renderedDate = null;
+    this._renderedLocale = null;
+    this._renderedTimeZone = null;
   }
 
   set hass(value) {
     this._hass = value;
     if (!this._initialized) this._renderShell();
-    this._renderContent();
+    if (this._showStatesChanged(value)) this._renderContent();
     this._syncAdminControls();
+  }
+
+  _showStatesChanged(hass) {
+    const current = new Map(
+      Object.entries(hass.states || {}).filter(([, state]) =>
+        state.attributes?.tv_show_monitor_entity === true
+      )
+    );
+    const date = this._dateKey(new Date());
+    const locale = hass.locale?.language || navigator.language;
+    const zone = this._timeZone();
+    const changed = this._renderedStates === null ||
+      this._renderedDate !== date ||
+      this._renderedLocale !== locale ||
+      this._renderedTimeZone !== zone ||
+      current.size !== this._renderedStates.size ||
+      [...current].some(([id, state]) => this._renderedStates.get(id) !== state);
+    if (changed) {
+      this._renderedStates = current;
+      this._renderedDate = date;
+      this._renderedLocale = locale;
+      this._renderedTimeZone = zone;
+    }
+    return changed;
   }
 
   get hass() {
