@@ -212,7 +212,9 @@ async def test_startup_events_wait_for_automation_listeners(hass, severance, epi
         hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
         await hass.async_block_till_done()
         assert len(events) == 1
-        assert coordinator._states[severance.tvmaze_id].episode_today_fired_key is not None
+        assert (
+            coordinator._states[severance.tvmaze_id].episode_today_fired_key is not None
+        )
 
         await coordinator._async_update_data()
         await hass.async_block_till_done()
