@@ -204,7 +204,9 @@ async def test_startup_events_wait_for_automation_listeners(hass, severance, epi
 
     try:
         # The HA test fixture is already RUNNING; emulate entry setup during boot.
-        with patch.object(type(hass), "is_running", new_callable=PropertyMock) as running:
+        with patch.object(
+            type(hass), "is_running", new_callable=PropertyMock
+        ) as running:
             running.return_value = False
             await coordinator._async_setup()
         await coordinator._async_update_data()
