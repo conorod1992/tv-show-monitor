@@ -202,6 +202,10 @@ class TVShowMonitorPanel extends HTMLElement {
   }
 
   _closeManage() {
+    // Invalidate any pending config/search/add/remove result before it can
+    // replace the state of a subsequently reopened dialog.
+    this._manageGeneration++;
+    this._searchGeneration++;
     this._manageOpen = false;
     this._manageData = null;
     this._manageBusy = false;
