@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.tv_show_monitor.api import TVMazeError, TVMazeNotFoundError
 from custom_components.tv_show_monitor.const import (
+    EVENT_EPISODE_AIRING,
     EVENT_SCHEDULE_CHANGED,
     MISSING_SHOW_404_THRESHOLD,
     ConfiguredShow,
@@ -391,3 +393,22 @@ async def test_midnight_notifies_entities_without_fetch(hass, severance, episode
 
     listener.assert_called_once()
     coordinator.client.async_get_show_schedule.assert_not_awaited()
+
+
+async def test_newly_discovered_recent_airing_fires_once(hass, severance, episode):
+    """A newly fetched already-aired episode must not need a restart to emit."""
+    aired = datetime.now(UTC) - timedelta(minutes=2)
+    recent_episode = replace(
+        episode, air_date=aired.date().isoformat(), air_stamp=aired.isoformat()
+    )
+    coordinator = make_coordinator(hass, [severance], [recent_episode, recent_episode])
+    events = []
+    hass.bus.async_listen(EVENT_EPISODE_AIRING, events.append)
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    assert len(events) == 1
+    assert events[0].data["tvmaze_show_id"] == severance.tvmaze_id
+    assert coordinator._states[severance.tvmaze_id].episode_airing_fired_key is not None
