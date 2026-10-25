@@ -53,4 +53,36 @@ const first = panel._dateFormatter("key");
 assert.equal(first, panel._dateFormatter("key"), "same formatter reused");
 panel._hass.config.time_zone = "UTC";
 assert.notEqual(first, panel._dateFormatter("key"), "timezone change invalidates formatter key");
+
+const renders = [];
+panel._renderContent = () => renders.push("render");
+panel._syncAdminControls = () => {};
+panel._initialized = true;
+const monitored = showState("Tracked", future);
+const hass = {
+  config: { time_zone: "Europe/Dublin" },
+  locale: { language: "en-IE" },
+  states: {
+    "sensor.tracked": monitored,
+    "sensor.unrelated": { state: "off", attributes: {} },
+  },
+};
+panel.hass = hass;
+assert.equal(renders.length, 1, "initial render");
+panel.hass = {
+  ...hass,
+  states: { ...hass.states, "sensor.unrelated": { state: "on", attributes: {} } },
+};
+assert.equal(renders.length, 1, "unrelated state change skips rerender");
+panel.hass = {
+  ...hass,
+  states: { ...hass.states, "sensor.tracked": { ...monitored } },
+};
+assert.equal(renders.length, 2, "show state changes rerender");
+panel.hass = {
+  ...hass,
+  locale: { language: "fr-FR" },
+  states: hass.states,
+};
+assert.equal(renders.length, 3, "locale change rerenders");
 console.log("Frontend behaviour checks passed");
