@@ -166,3 +166,55 @@ async def test_add_preserves_edits_made_while_search_was_pending(
 
     assert response["success"] is True
     assert [show["tvmaze_id"] for show in entry.options[CONF_SHOWS]] == [2]
+
+
+async def test_management_reload_flag_is_scoped_and_cleared(
+    hass, hass_ws_client, severance
+):
+    """Only the management-triggered reload should skip unchanged cached shows."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    key = f"{DOMAIN}_management_reload_{entry.entry_id}"
+    observed = []
+
+    async def reload_entry(_entry_id):
+        observed.append(hass.data.get(key))
+        return True
+
+    with patch.object(hass.config_entries, "async_reload", side_effect=reload_entry):
+        await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 216})
+        response = await client.receive_json()
+
+    assert response["success"] is True
+    assert observed == [True]
+    assert key not in hass.data
+
+
+async def test_management_reload_failure_keeps_saved_changes_but_clears_flag(
+    hass, hass_ws_client, severance
+):
+    """A failed reload must not make a later ordinary reload skip fetching."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    key = f"{DOMAIN}_management_reload_{entry.entry_id}"
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(side_effect=RuntimeError("unload failed"))
+    ):
+        await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 216})
+        response = await client.receive_json()
+
+    assert response["success"] is True
+    assert response["result"]["reloaded"] is False
+    assert entry.options[CONF_SHOWS] == []
+    assert key not in hass.data
