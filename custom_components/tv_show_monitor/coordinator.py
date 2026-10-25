@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import EVENT_HOMEASSISTANT_STARTED, HomeAssistant, callback
 from homeassistant.helpers.event import (
     async_track_point_in_time,
     async_track_time_change,
@@ -74,9 +74,18 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         self._storage_writes_enabled = True
         self._cancel_day_listener: Callable[[], None] | None = None
         self._airing_listeners: dict[int, Callable[[], None]] = {}
+        self._startup_events_ready = True
+        self._cancel_started_listener: Callable[[], None] | None = None
 
     async def _async_setup(self) -> None:
         """Restore valid state and prune deliberately removed shows."""
+        if not self.hass.is_running:
+            # Automation triggers are attached on HOMEASSISTANT_STARTED. Do not
+            # consume delivery markers while those listeners are still absent.
+            self._startup_events_ready = False
+            self._cancel_started_listener = self.hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED, self._handle_homeassistant_started
+            )
         try:
             stored = await self._store.async_load() or {}
         except Exception as err:  # Storage backends can raise implementation errors.
@@ -113,6 +122,18 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             self._catch_up_episode_airing_if_due(show)
             self._schedule_airing_event(show)
         await self._async_save()
+
+    @callback
+    def _handle_homeassistant_started(self, _event: object) -> None:
+        """Deliver restored/startup episode notifications after automations attach."""
+        self._cancel_started_listener = None
+        self._startup_events_ready = True
+        changed = False
+        for show in self.shows:
+            changed = self._fire_episode_today_if_due(show) or changed
+            changed = self._catch_up_episode_airing_if_due(show) or changed
+        if changed:
+            self.hass.async_create_task(self._async_save())
 
     async def _async_update_data(self) -> dict[int, ShowUpdateResult]:
         """Refresh due shows, preserving last-good state on errors."""
@@ -306,6 +327,8 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
 
     def _fire_episode_today_if_due(self, show: ConfiguredShow) -> bool:
         """Fire once when a scheduled episode airs today in Home Assistant time."""
+        if not self._startup_events_ready:
+            return False
         state = self._states.get(show.tvmaze_id)
         if state is None or state.episode is None:
             return False
@@ -327,6 +350,8 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
 
     def _catch_up_episode_airing_if_due(self, show: ConfiguredShow) -> bool:
         """Fire a recently missed exact airing event after restart."""
+        if not self._startup_events_ready:
+            return False
         state = self._states.get(show.tvmaze_id)
         if state is None or state.episode is None or state.episode.air_stamp is None:
             return False
@@ -388,6 +413,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
 
     async def async_shutdown(self) -> None:
         """Cancel integration-owned time listeners."""
+        if self._cancel_started_listener is not None:
+            self._cancel_started_listener()
+            self._cancel_started_listener = None
         if self._cancel_day_listener is not None:
             self._cancel_day_listener()
             self._cancel_day_listener = None
