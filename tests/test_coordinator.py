@@ -412,3 +412,33 @@ async def test_newly_discovered_recent_airing_fires_once(hass, severance, episod
     assert len(events) == 1
     assert events[0].data["tvmaze_show_id"] == severance.tvmaze_id
     assert coordinator._states[severance.tvmaze_id].episode_airing_fired_key is not None
+
+
+async def test_failed_inflight_refresh_preserves_new_airing_marker(
+    hass, severance, episode
+):
+    """A failed request must not undo an event emitted by an airing timer."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def failed_request(_show_id):
+        started.set()
+        await release.wait()
+        raise TVMazeError("offline")
+
+    coordinator = make_coordinator(hass, [severance], failed_request)
+    coordinator._states[severance.tvmaze_id] = LastKnownState(
+        has_successful_value=True, episode=episode, show_status="Running"
+    )
+    task = asyncio.create_task(coordinator._async_update_data())
+    await started.wait()
+    coordinator._states[severance.tvmaze_id] = replace(
+        coordinator._states[severance.tvmaze_id],
+        episode_airing_fired_key="aired-during-request",
+    )
+    release.set()
+    await task
+
+    state = coordinator._states[severance.tvmaze_id]
+    assert state.episode_airing_fired_key == "aired-during-request"
+    assert state.last_attempt_successful is False
