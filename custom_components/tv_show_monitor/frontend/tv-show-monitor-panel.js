@@ -183,6 +183,8 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageWarning = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._pendingAction = null;
+    this._cancelShowMutation();
     this._manageScrollTop = 0;
     const host = this.shadowRoot.querySelector("#dialog-host");
     if (host) host.innerHTML = "";
@@ -370,6 +372,7 @@ class TVShowMonitorPanel extends HTMLElement {
     const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
     this._beginShowMutation(currentCount + 1);
     this._pendingAction = { type: "add", id: tvmazeId };
+    const generation = this._manageGeneration;
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -380,6 +383,7 @@ class TVShowMonitorPanel extends HTMLElement {
         query: this._searchQuery,
         tvmaze_id: tvmazeId,
       });
+      if (generation !== this._manageGeneration) return;
       this._manageData = result;
       this._searchQuery = "";
       this._searchResults = null;
@@ -392,12 +396,16 @@ class TVShowMonitorPanel extends HTMLElement {
         this._renderContent();
       }
     } catch (error) {
-      this._cancelShowMutation();
-      this._manageError = this._errorText(error);
+      if (generation === this._manageGeneration) {
+        this._cancelShowMutation();
+        this._manageError = this._errorText(error);
+      }
     } finally {
-      this._pendingAction = null;
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration) {
+        this._pendingAction = null;
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
@@ -406,12 +414,14 @@ class TVShowMonitorPanel extends HTMLElement {
     const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
     this._beginShowMutation(currentCount - 1);
     this._pendingAction = { type: "remove", id: tvmazeId };
+    const generation = this._manageGeneration;
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
     this._renderManage();
     try {
       const result = await this._hass.callWS({ type: `${DOMAIN}/remove`, tvmaze_id: tvmazeId });
+      if (generation !== this._manageGeneration) return;
       this._manageData = result;
       this._pendingRemoveId = null;
       this._searchResults = null;
@@ -423,12 +433,16 @@ class TVShowMonitorPanel extends HTMLElement {
         this._renderContent();
       }
     } catch (error) {
-      this._cancelShowMutation();
-      this._manageError = this._errorText(error);
+      if (generation === this._manageGeneration) {
+        this._cancelShowMutation();
+        this._manageError = this._errorText(error);
+      }
     } finally {
-      this._pendingAction = null;
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration) {
+        this._pendingAction = null;
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
