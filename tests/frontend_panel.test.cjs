@@ -86,3 +86,34 @@ panel.hass = {
 };
 assert.equal(renders.length, 3, "locale change rerenders");
 console.log("Frontend behaviour checks passed");
+
+
+async function checkManageCloseInvalidatesPendingResponses() {
+  const managePanel = new Panel();
+  let resolveFirst;
+  let resolveSecond;
+  let calls = 0;
+  managePanel._hass = {
+    user: { is_admin: true },
+    callWS: () => new Promise((resolve) => {
+      if (++calls === 1) resolveFirst = resolve;
+      else resolveSecond = resolve;
+    }),
+  };
+  managePanel._renderManage = () => {};
+  managePanel._renderContent = () => {};
+  managePanel.shadowRoot = { querySelector: () => null };
+  const first = managePanel._openManage();
+  managePanel._closeManage();
+  const second = managePanel._openManage();
+  resolveSecond({ shows: [{ canonical_name: "New", tvmaze_id: 2 }] });
+  await second;
+  resolveFirst({ shows: [{ canonical_name: "Old", tvmaze_id: 1 }] });
+  await first;
+  assert.equal(managePanel._manageData.shows[0].tvmaze_id, 2,
+    "closed dialog's pending request cannot overwrite reopened dialog");
+  assert.equal(managePanel._manageBusy, false);
+}
+checkManageCloseInvalidatesPendingResponses()
+  .then(() => console.log("Async management lifecycle checks passed"))
+  .catch((error) => { console.error(error); process.exitCode = 1; });
