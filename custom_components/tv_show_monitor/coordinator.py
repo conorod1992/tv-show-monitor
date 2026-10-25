@@ -165,7 +165,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     MISSING_SHOW_404_THRESHOLD,
                 )
                 self._states[show.tvmaze_id] = replace(
-                    previous,
+                    self._states.get(show.tvmaze_id, previous),
                     last_update_attempt=attempt,
                     last_attempt_successful=False,
                     last_error=error,
@@ -179,7 +179,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     "Refresh failed for TVmaze show ID %s: %s", show.tvmaze_id, error
                 )
                 self._states[show.tvmaze_id] = replace(
-                    previous,
+                    self._states.get(show.tvmaze_id, previous),
                     last_update_attempt=attempt,
                     last_attempt_successful=False,
                     last_error=error,
@@ -192,7 +192,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     error,
                 )
                 self._states[show.tvmaze_id] = replace(
-                    previous,
+                    self._states.get(show.tvmaze_id, previous),
                     last_update_attempt=attempt,
                     last_attempt_successful=False,
                     last_error=error,
@@ -203,7 +203,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
                     show.tvmaze_id,
                 )
                 self._states[show.tvmaze_id] = replace(
-                    previous,
+                    self._states.get(show.tvmaze_id, previous),
                     last_update_attempt=attempt,
                     last_attempt_successful=False,
                     last_error="Unexpected refresh error",
