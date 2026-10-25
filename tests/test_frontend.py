@@ -147,3 +147,20 @@ def test_management_dialog_survives_normal_state_rerenders() -> None:
     assert 'const host = this.shadowRoot.querySelector("#dialog-host")' in panel
     assert "this.shadowRoot.innerHTML" in panel
     assert "content.innerHTML" in panel
+
+
+def test_date_formatters_are_reused_across_render_updates() -> None:
+    panel = _panel_source()
+
+    assert "this._dateFormatters = new Map()" in panel
+    assert 'this._dateFormatter("key").formatToParts(value)' in panel
+    assert 'this._dateFormatter("time").format(airing)' in panel
+    assert 'this._dateFormatter("shortDate").format(airing)' in panel
+    assert "this._dateFormatters.set(key, new Intl.DateTimeFormat(locale, options))" in panel
+
+
+def test_unsubmitted_search_text_survives_dialog_rebuild() -> None:
+    panel = _panel_source()
+
+    assert 'host.querySelector("#show-search")' in panel
+    assert "this._searchQuery = previousSearch.value" in panel
