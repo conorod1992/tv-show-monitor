@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
+from homeassistant.core import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -184,3 +185,37 @@ def test_future_episode_replacement_remains_a_schedule_change(episode):
     now = datetime(2026, 10, 1, tzinfo=UTC)
 
     assert _schedule_change_type(episode, new, now) == "next_episode_changed"
+
+
+async def test_startup_events_wait_for_automation_listeners(hass, severance, episode):
+    """Restore/startup refresh must not consume events before HA starts."""
+    today = dt_util.now().date().isoformat()
+    today_episode = replace(
+        episode,
+        air_date=today,
+        air_stamp=f"{today}T12:00:00+00:00",
+    )
+    coordinator = make_coordinator(
+        hass, severance, ShowScheduleInfo("Running", today_episode, None)
+    )
+    coordinator._store.async_load.return_value = {"shows": {}}
+    events = []
+    hass.bus.async_listen(EVENT_EPISODE_TODAY, events.append)
+
+    try:
+        await coordinator._async_setup()
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
+        assert events == []
+        assert coordinator._states[severance.tvmaze_id].episode_today_fired_key is None
+
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert len(events) == 1
+        assert coordinator._states[severance.tvmaze_id].episode_today_fired_key is not None
+
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
+        assert len(events) == 1
+    finally:
+        await coordinator.async_shutdown()
