@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, PropertyMock, patch
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.util import dt as dt_util
@@ -203,7 +203,10 @@ async def test_startup_events_wait_for_automation_listeners(hass, severance, epi
     hass.bus.async_listen(EVENT_EPISODE_TODAY, events.append)
 
     try:
-        await coordinator._async_setup()
+        # The HA test fixture is already RUNNING; emulate entry setup during boot.
+        with patch.object(type(hass), "is_running", new_callable=PropertyMock) as running:
+            running.return_value = False
+            await coordinator._async_setup()
         await coordinator._async_update_data()
         await hass.async_block_till_done()
         assert events == []
