@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -16,6 +15,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ShowSearchCandidate, TVMazeClient, TVMazeError
+from .compat import vol
 from .const import (
     CONF_POLL_INTERVAL,
     CONF_SHOW_NAMES,

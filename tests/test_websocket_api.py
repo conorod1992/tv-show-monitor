@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tv_show_monitor.api import ShowSearchCandidate, TVMazeClient
@@ -39,6 +40,27 @@ async def _management_client(hass, hass_ws_client):
     client = await hass_ws_client(hass)
     async_register_websocket_api(hass)
     return client
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"type": WS_SEARCH, "query": ""},
+        {"type": WS_SEARCH, "query": "x" * 101},
+        {"type": WS_ADD, "query": "Severance", "tvmaze_id": 0},
+    ],
+)
+async def test_invalid_management_messages_are_rejected_by_schema(
+    hass, hass_ws_client, payload
+):
+    """Both HA validation backends reject invalid input before calling TVmaze."""
+    client = await _management_client(hass, hass_ws_client)
+    with patch.object(TVMazeClient, "async_search_shows", AsyncMock()) as search:
+        await client.send_json_auto_id(payload)
+        response = await client.receive_json()
+    assert response["success"] is False
+    assert response["error"]["code"] == "invalid_format"
+    search.assert_not_awaited()
 
 
 async def test_config_returns_authoritative_show_list(hass, hass_ws_client, severance):

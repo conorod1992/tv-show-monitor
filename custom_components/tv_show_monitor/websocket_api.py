@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api.connection import ActiveConnection
 from homeassistant.components.websocket_api.decorators import (
@@ -18,6 +17,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ShowSearchCandidate, TVMazeClient, TVMazeError
+from .compat import vol
 from .const import (
     CONF_POLL_INTERVAL,
     CONF_SHOWS,
