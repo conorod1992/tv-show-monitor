@@ -92,7 +92,9 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
 
         initial_entities = _entity_ids(hass, entry)
         assert set(initial_entities) == {f"{DOMAIN}_216_next_episode"}
-        assert hass.states.get(initial_entities[f"{DOMAIN}_216_next_episode"]) is not None
+        assert (
+            hass.states.get(initial_entities[f"{DOMAIN}_216_next_episode"]) is not None
+        )
         assert len(_device_ids(hass, entry)) == 1
 
         await client.send_json_auto_id(
@@ -110,9 +112,10 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
         }
         assert len(_device_ids(hass, entry)) == 2
         assert hass.states.get(after_add[f"{DOMAIN}_2_next_episode"]) is not None
-        assert after_add[f"{DOMAIN}_216_next_episode"] == initial_entities[
-            f"{DOMAIN}_216_next_episode"
-        ]
+        assert (
+            after_add[f"{DOMAIN}_216_next_episode"]
+            == initial_entities[f"{DOMAIN}_216_next_episode"]
+        )
 
         await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 216})
         removed = await client.receive_json()
