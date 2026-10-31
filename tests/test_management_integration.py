@@ -100,6 +100,7 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
             hass.states.get(initial_entities[f"{DOMAIN}_216_next_episode"]) is not None
         )
         assert len(_device_ids(hass, entry)) == 1
+        schedule_client.async_get_show_schedule.assert_awaited_once_with(216)
 
         await client.send_json_auto_id(
             {"type": WS_ADD, "query": "Doctor Who", "tvmaze_id": 2}
@@ -120,6 +121,19 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
             after_add[f"{DOMAIN}_216_next_episode"]
             == initial_entities[f"{DOMAIN}_216_next_episode"]
         )
+        assert [
+            call.args[0]
+            for call in schedule_client.async_get_show_schedule.await_args_list
+        ] == [216, 2]
+        stored = await entry.runtime_data.coordinator._store.async_load()
+        assert set(stored["shows"]) == {"216", "2"}
+
+        # Disabled entities still need registry and device cleanup on removal.
+        er.async_get(hass).async_update_entity(
+            initial_entities[f"{DOMAIN}_216_next_episode"],
+            disabled_by=er.RegistryEntryDisabler.USER,
+        )
+        await hass.async_block_till_done()
 
         await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 216})
         removed = await client.receive_json()
@@ -132,6 +146,8 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
         assert hass.states.get(initial_entities[f"{DOMAIN}_216_next_episode"]) is None
         assert len(_device_ids(hass, entry)) == 1
         assert hass.states.get(after_remove[f"{DOMAIN}_2_next_episode"]) is not None
+        stored = await entry.runtime_data.coordinator._store.async_load()
+        assert set(stored["shows"]) == {"2"}
 
         await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 2})
         final = await client.receive_json()
@@ -142,5 +158,8 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
         assert _entity_ids(hass, entry) == {}
         assert _device_ids(hass, entry) == set()
         assert hass.states.get(after_remove[f"{DOMAIN}_2_next_episode"]) is None
+        stored = await entry.runtime_data.coordinator._store.async_load()
+        assert stored["shows"] == {}
+        assert schedule_client.async_get_show_schedule.await_count == 2
 
         assert await hass.config_entries.async_unload(entry.entry_id)
