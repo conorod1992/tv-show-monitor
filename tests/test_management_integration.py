@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+from homeassistant.setup import async_setup_component
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -62,6 +63,9 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
         entry_id="tv-show-monitor-lifecycle",
     )
     entry.add_to_hass(hass)
+    # Register frontend HTTP routes before the WebSocket test client freezes
+    # the aiohttp router, just as happens during normal Home Assistant boot.
+    assert await async_setup_component(hass, "frontend", {})
     client = await hass_ws_client(hass)
     schedule_client = AsyncMock()
     schedule_client.async_get_show_schedule.return_value = ShowScheduleInfo(
