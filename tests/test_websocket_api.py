@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tv_show_monitor.api import ShowSearchCandidate, TVMazeClient
@@ -38,6 +40,27 @@ async def _management_client(hass, hass_ws_client):
     client = await hass_ws_client(hass)
     async_register_websocket_api(hass)
     return client
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"type": WS_SEARCH, "query": ""},
+        {"type": WS_SEARCH, "query": "x" * 101},
+        {"type": WS_ADD, "query": "Severance", "tvmaze_id": 0},
+    ],
+)
+async def test_invalid_management_messages_are_rejected_by_schema(
+    hass, hass_ws_client, payload
+):
+    """Both HA validation backends reject invalid input before calling TVmaze."""
+    client = await _management_client(hass, hass_ws_client)
+    with patch.object(TVMazeClient, "async_search_shows", AsyncMock()) as search:
+        await client.send_json_auto_id(payload)
+        response = await client.receive_json()
+    assert response["success"] is False
+    assert response["error"]["code"] == "invalid_format"
+    search.assert_not_awaited()
 
 
 async def test_config_returns_authoritative_show_list(hass, hass_ws_client, severance):
@@ -128,3 +151,94 @@ async def test_remove_can_leave_an_empty_show_list(hass, hass_ws_client, severan
     assert response["result"]["shows"] == []
     assert entry.options[CONF_SHOWS] == []
     reload_entry.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_add_preserves_edits_made_while_search_was_pending(
+    hass, hass_ws_client, severance
+):
+    """A delayed add must not restore a show removed by another admin."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_search(query):
+        started.set()
+        await release.wait()
+        return [candidate(2, "Doctor Who")]
+
+    with (
+        patch.object(TVMazeClient, "async_search_shows", side_effect=slow_search),
+        patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
+    ):
+        await client.send_json_auto_id(
+            {"type": WS_ADD, "query": "Doctor Who", "tvmaze_id": 2}
+        )
+        await started.wait()
+        hass.config_entries.async_update_entry(
+            entry, options={CONF_SHOWS: [], CONF_POLL_INTERVAL: 24}
+        )
+        release.set()
+        response = await client.receive_json()
+
+    assert response["success"] is True
+    assert [show["tvmaze_id"] for show in entry.options[CONF_SHOWS]] == [2]
+
+
+async def test_management_reload_flag_is_scoped_and_cleared(
+    hass, hass_ws_client, severance
+):
+    """Only the management-triggered reload should skip unchanged cached shows."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    key = f"{DOMAIN}_management_reload_{entry.entry_id}"
+    observed = []
+
+    async def reload_entry(_entry_id):
+        observed.append(hass.data.get(key))
+        return True
+
+    with patch.object(hass.config_entries, "async_reload", side_effect=reload_entry):
+        await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 216})
+        response = await client.receive_json()
+
+    assert response["success"] is True
+    assert observed == [True]
+    assert key not in hass.data
+
+
+async def test_management_reload_failure_keeps_saved_changes_but_clears_flag(
+    hass, hass_ws_client, severance
+):
+    """A failed reload must not make a later ordinary reload skip fetching."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    key = f"{DOMAIN}_management_reload_{entry.entry_id}"
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        AsyncMock(side_effect=RuntimeError("unload failed")),
+    ):
+        await client.send_json_auto_id({"type": WS_REMOVE, "tvmaze_id": 216})
+        response = await client.receive_json()
+
+    assert response["success"] is True
+    assert response["result"]["reloaded"] is False
+    assert entry.options[CONF_SHOWS] == []
+    assert key not in hass.data

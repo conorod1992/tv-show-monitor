@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.data_entry_flow import FlowManagerIndexView
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tv_show_monitor.api import (
@@ -61,6 +62,21 @@ async def test_successful_setup_with_clear_exact_match(hass):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_SHOWS][0]["tvmaze_id"] == 216
     search.assert_awaited_once_with("Severance")
+
+
+async def test_setup_form_serializes_with_home_assistant_backend(hass):
+    """The native HA serializer must recognise our schema and selector fields."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    form = FlowManagerIndexView(hass.config_entries.flow)._prepare_result_json(result)
+
+    [field] = form["data_schema"]
+    assert field["name"] == CONF_SHOW_NAMES
+    assert field["required"] is True
+    assert field["default"] == ""
+    assert field["selector"]["text"]["multiline"] is True
+    assert field["selector"]["text"]["type"] == "text"
 
 
 async def test_ambiguous_setup_asks_user_to_choose(hass):

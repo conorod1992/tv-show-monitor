@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.tv_show_monitor.api import TVMazeError, TVMazeNotFoundError
 from custom_components.tv_show_monitor.const import (
+    EVENT_EPISODE_AIRING,
     EVENT_SCHEDULE_CHANGED,
     MISSING_SHOW_404_THRESHOLD,
     ConfiguredShow,
@@ -312,3 +314,131 @@ async def test_concurrent_refreshes_are_deduplicated(hass, severance, episode):
     await asyncio.gather(first, second)
     assert coordinator.client.async_get_show_schedule.await_count == 1
     await coordinator.async_shutdown()
+
+
+async def test_management_reload_uses_cached_shows_without_network(
+    hass, severance, episode
+):
+    """Reloading after a list edit should only fetch new shows."""
+    other = ConfiguredShow(2, "Doctor Who", "Doctor Who")
+    coordinator = make_coordinator(hass, [severance, other], [episode])
+    coordinator._skip_initial_unchanged = True
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True, episode=episode, show_status="Running"
+    )
+
+    result = await coordinator._async_update_data()
+
+    coordinator.client.async_get_show_schedule.assert_awaited_once_with(2)
+    assert result[216].state.episode == episode
+    assert result[2].state.episode == episode
+    assert coordinator._skip_initial_unchanged is False
+
+
+async def test_cached_management_reload_with_no_new_shows_does_not_fetch(
+    hass, severance, episode
+):
+    """Removing a show should not force remaining shows to contact TVmaze."""
+    coordinator = make_coordinator(hass, [severance], [])
+    coordinator._skip_initial_unchanged = True
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True, episode=episode, show_status="Running"
+    )
+
+    result = await coordinator._async_update_data()
+
+    coordinator.client.async_get_show_schedule.assert_not_awaited()
+    assert result[216].state.episode == episode
+
+
+async def test_inflight_refresh_preserves_newly_written_airing_marker(
+    hass, severance, episode
+):
+    """Timer delivery during a network request must not reset its marker."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fetch(_show_id):
+        started.set()
+        await release.wait()
+        return episode
+
+    coordinator = make_coordinator(hass, [severance], fetch)
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True, episode=episode, show_status="Running"
+    )
+    task = asyncio.create_task(coordinator._async_update_data())
+    await started.wait()
+    coordinator._states[216] = replace(
+        coordinator._states[216],
+        episode_airing_fired_key=f"{episode.episode_id}:{episode.air_stamp}",
+    )
+    release.set()
+    await task
+
+    assert coordinator._states[216].episode_airing_fired_key == (
+        f"{episode.episode_id}:{episode.air_stamp}"
+    )
+
+
+async def test_midnight_notifies_entities_without_fetch(hass, severance, episode):
+    coordinator = make_coordinator(hass, [severance], [])
+    coordinator._states[216] = LastKnownState(
+        has_successful_value=True, episode=episode, show_status="Running"
+    )
+    listener = MagicMock()
+    coordinator.async_add_listener(listener)
+
+    coordinator._handle_local_midnight(None)
+
+    listener.assert_called_once()
+    coordinator.client.async_get_show_schedule.assert_not_awaited()
+
+
+async def test_newly_discovered_recent_airing_fires_once(hass, severance, episode):
+    """A newly fetched already-aired episode must not need a restart to emit."""
+    aired = datetime.now(UTC) - timedelta(minutes=2)
+    recent_episode = replace(
+        episode, air_date=aired.date().isoformat(), air_stamp=aired.isoformat()
+    )
+    coordinator = make_coordinator(hass, [severance], [recent_episode, recent_episode])
+    events = []
+    hass.bus.async_listen(EVENT_EPISODE_AIRING, events.append)
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    assert len(events) == 1
+    assert events[0].data["tvmaze_show_id"] == severance.tvmaze_id
+    assert coordinator._states[severance.tvmaze_id].episode_airing_fired_key is not None
+
+
+async def test_failed_inflight_refresh_preserves_new_airing_marker(
+    hass, severance, episode
+):
+    """A failed request must not undo an event emitted by an airing timer."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def failed_request(_show_id):
+        started.set()
+        await release.wait()
+        raise TVMazeError("offline")
+
+    coordinator = make_coordinator(hass, [severance], failed_request)
+    coordinator._states[severance.tvmaze_id] = LastKnownState(
+        has_successful_value=True, episode=episode, show_status="Running"
+    )
+    task = asyncio.create_task(coordinator._async_update_data())
+    await started.wait()
+    coordinator._states[severance.tvmaze_id] = replace(
+        coordinator._states[severance.tvmaze_id],
+        episode_airing_fired_key="aired-during-request",
+    )
+    release.set()
+    await task
+
+    state = coordinator._states[severance.tvmaze_id]
+    assert state.episode_airing_fired_key == "aired-during-request"
+    assert state.last_attempt_successful is False

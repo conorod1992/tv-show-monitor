@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, PropertyMock, patch
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.tv_show_monitor.const import (
     EVENT_EPISODE_AIRING,
@@ -184,3 +188,126 @@ def test_future_episode_replacement_remains_a_schedule_change(episode):
     now = datetime(2026, 10, 1, tzinfo=UTC)
 
     assert _schedule_change_type(episode, new, now) == "next_episode_changed"
+
+
+async def test_startup_events_wait_for_automation_listeners(hass, severance, episode):
+    """Restore/startup refresh must not consume events before HA starts."""
+    today = dt_util.now().date().isoformat()
+    today_episode = replace(
+        episode,
+        air_date=today,
+        air_stamp=f"{today}T12:00:00+00:00",
+    )
+    coordinator = make_coordinator(
+        hass, severance, ShowScheduleInfo("Running", today_episode, None)
+    )
+    coordinator._store.async_load.return_value = {"shows": {}}
+    events = []
+    hass.bus.async_listen(EVENT_EPISODE_TODAY, events.append)
+
+    try:
+        # The HA test fixture is already RUNNING; emulate entry setup during boot.
+        with patch.object(
+            type(hass), "is_running", new_callable=PropertyMock
+        ) as running:
+            running.return_value = False
+            await coordinator._async_setup()
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
+        assert events == []
+        assert coordinator._states[severance.tvmaze_id].episode_today_fired_key is None
+
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert len(events) == 1
+        assert (
+            coordinator._states[severance.tvmaze_id].episode_today_fired_key is not None
+        )
+
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
+        assert len(events) == 1
+    finally:
+        await coordinator.async_shutdown()
+
+
+async def test_airing_timer_during_boot_waits_for_started(
+    hass, severance, episode, freezer
+):
+    """A timer expiring during boot must not consume an undelivered event."""
+    freezer.move_to("2026-10-31T12:00:00+00:00")
+    upcoming = replace(episode, air_stamp="2026-10-31T12:01:00+00:00")
+    coordinator = make_coordinator(
+        hass, severance, ShowScheduleInfo("Running", upcoming, None)
+    )
+    coordinator._store.async_load.return_value = {"shows": {}}
+    events = []
+    hass.bus.async_listen(EVENT_EPISODE_AIRING, events.append)
+    try:
+        with patch.object(
+            type(hass), "is_running", new_callable=PropertyMock
+        ) as running:
+            running.return_value = False
+            await coordinator._async_setup()
+        await coordinator._async_update_data()
+        freezer.tick(timedelta(minutes=2))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done()
+        assert events == []
+        assert coordinator._states[216].episode_airing_fired_key is None
+
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert len(events) == 1
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
+        assert len(events) == 1
+    finally:
+        await coordinator.async_shutdown()
+
+
+async def test_startup_refresh_advancing_schedule_preserves_deferred_events(
+    hass, severance, episode, freezer
+):
+    """A fresh next episode must not erase catch-up for the restored episode."""
+    freezer.move_to("2026-10-31T12:00:00+00:00")
+    aired = replace(
+        episode, air_date="2026-10-31", air_stamp="2026-10-31T11:30:00+00:00"
+    )
+    following = replace(
+        episode,
+        episode_id=54321,
+        air_date="2026-11-07",
+        air_stamp="2026-11-07T11:30:00+00:00",
+    )
+    coordinator = make_coordinator(
+        hass, severance, ShowScheduleInfo("Running", following, aired)
+    )
+    coordinator._store.async_load.return_value = {
+        "shows": {
+            "216": LastKnownState(has_successful_value=True, episode=aired).as_dict()
+        }
+    }
+    today_events, airing_events = [], []
+    hass.bus.async_listen(EVENT_EPISODE_TODAY, today_events.append)
+    hass.bus.async_listen(EVENT_EPISODE_AIRING, airing_events.append)
+    try:
+        with patch.object(
+            type(hass), "is_running", new_callable=PropertyMock
+        ) as running:
+            running.return_value = False
+            await coordinator._async_setup()
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
+        assert today_events == airing_events == []
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert [event.data["episode_id"] for event in today_events] == [
+            aired.episode_id
+        ]
+        assert [event.data["episode_id"] for event in airing_events] == [
+            aired.episode_id
+        ]
+        assert coordinator._states[216].episode == following
+    finally:
+        await coordinator.async_shutdown()

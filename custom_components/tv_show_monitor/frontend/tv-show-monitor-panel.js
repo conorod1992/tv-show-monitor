@@ -17,13 +17,45 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageScrollTop = 0;
     this._lastStableShows = null;
     this._showMutationExpectedCount = null;
+    this._manageGeneration = 0;
+    this._searchGeneration = 0;
+    this._pendingAction = null;
+    this._dateFormatters = new Map();
+    this._renderedStates = null;
+    this._renderedDate = null;
+    this._renderedLocale = null;
+    this._renderedTimeZone = null;
   }
 
   set hass(value) {
     this._hass = value;
     if (!this._initialized) this._renderShell();
-    this._renderContent();
+    if (this._showStatesChanged(value)) this._renderContent();
     this._syncAdminControls();
+  }
+
+  _showStatesChanged(hass) {
+    const current = new Map(
+      Object.entries(hass.states || {}).filter(([, state]) =>
+        state.attributes?.tv_show_monitor_entity === true
+      )
+    );
+    const date = this._dateKey(new Date());
+    const locale = hass.locale?.language || navigator.language;
+    const zone = this._timeZone();
+    const changed = this._renderedStates === null ||
+      this._renderedDate !== date ||
+      this._renderedLocale !== locale ||
+      this._renderedTimeZone !== zone ||
+      current.size !== this._renderedStates.size ||
+      [...current].some(([id, state]) => this._renderedStates.get(id) !== state);
+    if (changed) {
+      this._renderedStates = current;
+      this._renderedDate = date;
+      this._renderedLocale = locale;
+      this._renderedTimeZone = zone;
+    }
+    return changed;
   }
 
   get hass() {
@@ -82,9 +114,14 @@ class TVShowMonitorPanel extends HTMLElement {
     const today = shows.filter((show) => show.group === "today");
     const upcoming = shows.filter((show) => show.group === "upcoming");
     const recent = shows
-      .map((show) => this._recentFromShow(show))
+      .flatMap((show) => [this._recentNextFromShow(show), this._recentFromShow(show)])
       .filter((show) => show !== null)
-      .sort((a, b) => b.airing.getTime() - a.airing.getTime() || a.name.localeCompare(b.name));
+      .filter((show, index, array) => array.findIndex((other) =>
+        other.entityId === show.entityId &&
+        (other.recentEpisode ? other.attr.previous_episode_id : other.attr.episode_id) ===
+        (show.recentEpisode ? show.attr.previous_episode_id : show.attr.episode_id)
+      ) === index)
+      .sort((a, b) => (b.airing?.getTime() ?? 0) - (a.airing?.getTime() ?? 0) || a.name.localeCompare(b.name));
     const unscheduled = shows.filter((show) => show.group === "unscheduled");
     const ended = shows.filter((show) => show.group === "ended");
 
@@ -139,6 +176,7 @@ class TVShowMonitorPanel extends HTMLElement {
   async _openManage() {
     if (this._hass?.user?.is_admin !== true) return;
     this._manageOpen = true;
+    const generation = ++this._manageGeneration;
     this._manageData = null;
     this._manageBusy = true;
     this._manageError = "";
@@ -150,16 +188,24 @@ class TVShowMonitorPanel extends HTMLElement {
     this._renderManage();
 
     try {
-      this._manageData = await this._hass.callWS({ type: `${DOMAIN}/config` });
+      const result = await this._hass.callWS({ type: `${DOMAIN}/config` });
+      if (generation !== this._manageGeneration) return;
+      this._manageData = result;
     } catch (error) {
-      this._manageError = this._errorText(error);
+      if (generation === this._manageGeneration) this._manageError = this._errorText(error);
     } finally {
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration) {
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
   _closeManage() {
+    // Invalidate any pending config/search/add/remove result before it can
+    // replace the state of a subsequently reopened dialog.
+    this._manageGeneration++;
+    this._searchGeneration++;
     this._manageOpen = false;
     this._manageData = null;
     this._manageBusy = false;
@@ -167,6 +213,8 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageWarning = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._pendingAction = null;
+    this._cancelShowMutation();
     this._manageScrollTop = 0;
     const host = this.shadowRoot.querySelector("#dialog-host");
     if (host) host.innerHTML = "";
@@ -211,6 +259,10 @@ class TVShowMonitorPanel extends HTMLElement {
 
     const searchForm = host.querySelector("#show-search-form");
     if (searchForm) searchForm.addEventListener("submit", (event) => this._searchShows(event));
+    const searchInput = host.querySelector("#show-search");
+    if (searchInput) searchInput.addEventListener("input", () => {
+      this._searchQuery = searchInput.value;
+    });
 
     host.querySelectorAll("[data-remove-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -235,7 +287,9 @@ class TVShowMonitorPanel extends HTMLElement {
 
   _manageBody() {
     const data = this._manageData;
-    const shows = data.shows || [];
+    const shows = [...(data.shows || [])].sort((a, b) =>
+      a.canonical_name.localeCompare(b.canonical_name, undefined, { sensitivity: "base", numeric: true }) || Number(a.tvmaze_id) - Number(b.tvmaze_id)
+    );
     const atLimit = shows.length >= data.max_shows;
     return `
       <section class="manage-section">
@@ -271,7 +325,7 @@ class TVShowMonitorPanel extends HTMLElement {
           </div>
           <div class="row-actions">
             <button class="secondary-button" type="button" data-cancel-remove ${this._manageBusy ? "disabled" : ""}>Cancel</button>
-            <button class="danger-button" type="button" data-confirm-remove="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+            <button class="danger-button" type="button" data-confirm-remove="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>${this._pendingAction?.type === "remove" && this._pendingAction.id === Number(show.tvmaze_id) ? "Removing…" : "Remove"}</button>
           </div>
         </div>
       `;
@@ -308,7 +362,7 @@ class TVShowMonitorPanel extends HTMLElement {
           <strong>${this._escape(candidate.name)}</strong>
           ${details ? `<span class="row-meta">${this._escape(details)}</span>` : ""}
         </div>
-        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${alreadyAdded || this._manageBusy ? "disabled" : ""}>${alreadyAdded ? "Added" : "Add"}</button>
+        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${alreadyAdded || this._manageBusy ? "disabled" : ""}>${alreadyAdded ? "Added" : this._pendingAction?.type === "add" && this._pendingAction.id === Number(candidate.tvmaze_id) ? "Adding…" : "Add"}</button>
       </div>
     `;
   }
@@ -320,6 +374,8 @@ class TVShowMonitorPanel extends HTMLElement {
     if (!query || this._manageBusy) return;
 
     this._searchQuery = query;
+    const generation = this._manageGeneration;
+    const searchGeneration = ++this._searchGeneration;
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -327,14 +383,19 @@ class TVShowMonitorPanel extends HTMLElement {
     this._renderManage();
     try {
       const result = await this._hass.callWS({ type: `${DOMAIN}/search`, query });
+      if (generation !== this._manageGeneration || searchGeneration !== this._searchGeneration) return;
       this._searchQuery = result.query;
       this._searchResults = result.candidates || [];
     } catch (error) {
-      this._manageError = this._errorText(error);
-      this._searchResults = [];
+      if (generation === this._manageGeneration && searchGeneration === this._searchGeneration) {
+        this._manageError = this._errorText(error);
+        this._searchResults = [];
+      }
     } finally {
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration && searchGeneration === this._searchGeneration) {
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
@@ -342,6 +403,8 @@ class TVShowMonitorPanel extends HTMLElement {
     if (this._manageBusy || !this._searchQuery) return;
     const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
     this._beginShowMutation(currentCount + 1);
+    this._pendingAction = { type: "add", id: tvmazeId };
+    const generation = this._manageGeneration;
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
@@ -352,6 +415,7 @@ class TVShowMonitorPanel extends HTMLElement {
         query: this._searchQuery,
         tvmaze_id: tvmazeId,
       });
+      if (generation !== this._manageGeneration) return;
       this._manageData = result;
       this._searchQuery = "";
       this._searchResults = null;
@@ -360,14 +424,20 @@ class TVShowMonitorPanel extends HTMLElement {
         this._cancelShowMutation();
         this._manageWarning = "The show was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
+        this._showMutationExpectedCount = null;
         this._renderContent();
       }
     } catch (error) {
-      this._cancelShowMutation();
-      this._manageError = this._errorText(error);
+      if (generation === this._manageGeneration) {
+        this._cancelShowMutation();
+        this._manageError = this._errorText(error);
+      }
     } finally {
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration) {
+        this._pendingAction = null;
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
@@ -375,12 +445,15 @@ class TVShowMonitorPanel extends HTMLElement {
     if (this._manageBusy) return;
     const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
     this._beginShowMutation(currentCount - 1);
+    this._pendingAction = { type: "remove", id: tvmazeId };
+    const generation = this._manageGeneration;
     this._manageBusy = true;
     this._manageError = "";
     this._manageWarning = "";
     this._renderManage();
     try {
       const result = await this._hass.callWS({ type: `${DOMAIN}/remove`, tvmaze_id: tvmazeId });
+      if (generation !== this._manageGeneration) return;
       this._manageData = result;
       this._pendingRemoveId = null;
       this._searchResults = null;
@@ -388,14 +461,20 @@ class TVShowMonitorPanel extends HTMLElement {
         this._cancelShowMutation();
         this._manageWarning = "The removal was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
+        this._showMutationExpectedCount = null;
         this._renderContent();
       }
     } catch (error) {
-      this._cancelShowMutation();
-      this._manageError = this._errorText(error);
+      if (generation === this._manageGeneration) {
+        this._cancelShowMutation();
+        this._manageError = this._errorText(error);
+      }
     } finally {
-      this._manageBusy = false;
-      if (this._manageOpen) this._renderManage();
+      if (generation === this._manageGeneration) {
+        this._pendingAction = null;
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
     }
   }
 
@@ -414,9 +493,7 @@ class TVShowMonitorPanel extends HTMLElement {
     const hasEpisode = attr.next_episode_found === true;
     let group = "unscheduled";
 
-    if (state.state === "Ended" || attr.show_status === "Ended") {
-      group = "ended";
-    } else if (hasEpisode && localDate === todayKey) {
+    if (hasEpisode && localDate === todayKey) {
       group = "today";
     } else if (hasEpisode && airing && airing < now) {
       group = "recent";
@@ -424,6 +501,8 @@ class TVShowMonitorPanel extends HTMLElement {
       group = "recent";
     } else if (hasEpisode) {
       group = "upcoming";
+    } else if (state.state === "Ended" || attr.show_status === "Ended") {
+      group = "ended";
     }
 
     return {
@@ -436,6 +515,13 @@ class TVShowMonitorPanel extends HTMLElement {
       hasEpisode,
       recentEpisode: false,
     };
+  }
+
+  _recentNextFromShow(show) {
+    if (show.group !== "recent") return null;
+    const localDate = show.airing ? this._dateKey(show.airing) : show.attr.air_date;
+    const dayDifference = this._dayDifference(this._dateKey(new Date()), localDate);
+    return dayDifference === 0 || dayDifference === -1 ? show : null;
   }
 
   _recentFromShow(show) {
@@ -507,13 +593,7 @@ class TVShowMonitorPanel extends HTMLElement {
       return this._escape([attr.air_date, attr.air_time].filter(Boolean).join(" · "));
     }
 
-    const locale = this._hass.locale?.language || navigator.language;
-    const options = this._timeZone() ? { timeZone: this._timeZone() } : {};
-    const time = new Intl.DateTimeFormat(locale, {
-      ...options,
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(airing);
+    const time = this._dateFormatter("time").format(airing);
     const todayKey = this._dateKey(new Date());
     const airingKey = this._dateKey(airing);
     const dayDifference = this._dayDifference(todayKey, airingKey);
@@ -532,12 +612,7 @@ class TVShowMonitorPanel extends HTMLElement {
       return `Aired ${Math.abs(dayDifference)} days ago · ${this._escape(time)}`;
     }
 
-    const date = new Intl.DateTimeFormat(locale, {
-      ...options,
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-    }).format(airing);
+    const date = this._dateFormatter("shortDate").format(airing);
     return `${this._escape(date)} · ${this._escape(time)}`;
   }
 
@@ -545,15 +620,23 @@ class TVShowMonitorPanel extends HTMLElement {
     return this._hass?.config?.time_zone || undefined;
   }
 
+  _dateFormatter(kind) {
+    const zone = this._timeZone();
+    const locale = kind === "key" ? "en-CA" : (this._hass?.locale?.language || navigator.language);
+    const key = `${kind}:${locale}:${zone || "local"}`;
+    if (!this._dateFormatters.has(key)) {
+      const options = zone ? { timeZone: zone } : {};
+      if (kind === "key") Object.assign(options, { year: "numeric", month: "2-digit", day: "2-digit" });
+      else if (kind === "time") Object.assign(options, { hour: "numeric", minute: "2-digit" });
+      else Object.assign(options, { weekday: "short", day: "numeric", month: "short" });
+      this._dateFormatters.set(key, new Intl.DateTimeFormat(locale, options));
+    }
+    return this._dateFormatters.get(key);
+  }
+
   _dateKey(value) {
-    const formatter = new Intl.DateTimeFormat("en-CA", {
-      ...(this._timeZone() ? { timeZone: this._timeZone() } : {}),
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
     const parts = Object.fromEntries(
-      formatter.formatToParts(value).map((part) => [part.type, part.value])
+      this._dateFormatter("key").formatToParts(value).map((part) => [part.type, part.value])
     );
     return `${parts.year}-${parts.month}-${parts.day}`;
   }

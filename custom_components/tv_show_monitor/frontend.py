@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from homeassistant.components import frontend
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
+from .compat import StaticPathConfig
 from .const import DOMAIN, NAME
 
 PANEL_URL_PATH = "tv-show-monitor"

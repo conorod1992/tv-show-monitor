@@ -58,6 +58,9 @@ async def async_setup_entry(
         shows,
         int(entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_HOURS)),
         entry,
+        skip_initial_unchanged=bool(
+            hass.data.pop(f"{DOMAIN}_management_reload_{entry.entry_id}", False)
+        ),
     )
     entry.async_on_unload(coordinator.async_shutdown)
     entry.runtime_data = TVShowMonitorRuntimeData(coordinator)
