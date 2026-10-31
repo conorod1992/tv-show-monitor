@@ -47,6 +47,16 @@ const futureEnded = panel._showFromState("sensor.future", showState("Finale", fu
 assert.equal(futureEnded.group, "upcoming", "upcoming finale remains scheduled");
 const pastRunning = panel._showFromState("sensor.past", showState("Delayed poll", past));
 assert.equal(pastRunning.group, "recent", "elapsed cached episode is recognised");
+assert.equal(panel._recentNextFromShow(pastRunning), null,
+  "stale cached episodes outside today/yesterday stay out of Recent");
+const yesterday = new Date();
+yesterday.setDate(yesterday.getDate() - 1);
+const dateOnly = showState("No absolute time", yesterday.toISOString());
+dateOnly.attributes.air_stamp = null;
+dateOnly.attributes.air_date = panel._dateKey(yesterday);
+const recentDateOnly = panel._showFromState("sensor.date_only", dateOnly);
+assert.equal(panel._recentNextFromShow(recentDateOnly), recentDateOnly,
+  "yesterday's cached episode without a timestamp appears in Recent");
 const ended = panel._showFromState("sensor.ended", showState("Finished", null, "Ended"));
 assert.equal(ended.group, "ended", "ended without next episode stays ended");
 const first = panel._dateFormatter("key");
@@ -114,6 +124,39 @@ async function checkManageCloseInvalidatesPendingResponses() {
     "closed dialog's pending request cannot overwrite reopened dialog");
   assert.equal(managePanel._manageBusy, false);
 }
-checkManageCloseInvalidatesPendingResponses()
+async function checkSuccessfulAddClearsSearch() {
+  const managePanel = new Panel();
+  const listeners = {};
+  const search = {
+    value: "Doctor Who",
+    addEventListener: (type, listener) => { listeners[type] = listener; },
+  };
+  const element = { scrollTop: 0, addEventListener: () => {} };
+  const host = {
+    innerHTML: "",
+    querySelector: (selector) => selector === "#show-search" ? search : element,
+    querySelectorAll: () => [],
+  };
+  managePanel.shadowRoot = { querySelector: () => host };
+  managePanel._manageOpen = true;
+  managePanel._manageData = { shows: [], max_shows: 50 };
+  managePanel._searchQuery = search.value;
+  managePanel._renderContent = () => {};
+  managePanel._hass = {
+    callWS: async () => ({ shows: [{ canonical_name: "Doctor Who", tvmaze_id: 2 }], max_shows: 50, reloaded: true }),
+  };
+  managePanel._renderManage();
+  search.value = "Doctor";
+  listeners.input();
+  managePanel._renderManage();
+  assert.equal(managePanel._searchQuery, "Doctor", "unsubmitted edits survive a dialog rebuild");
+  await managePanel._addShow(2);
+  assert.equal(managePanel._searchQuery, "", "successful add clears the submitted query");
+  assert.match(host.innerHTML, /placeholder="Search TVmaze by show title" value=""/);
+}
+
+Promise.resolve()
+  .then(checkManageCloseInvalidatesPendingResponses)
+  .then(checkSuccessfulAddClearsSearch)
   .then(() => console.log("Async management lifecycle checks passed"))
   .catch((error) => { console.error(error); process.exitCode = 1; });

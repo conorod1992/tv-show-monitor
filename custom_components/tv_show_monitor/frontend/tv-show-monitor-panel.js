@@ -114,7 +114,7 @@ class TVShowMonitorPanel extends HTMLElement {
     const today = shows.filter((show) => show.group === "today");
     const upcoming = shows.filter((show) => show.group === "upcoming");
     const recent = shows
-      .flatMap((show) => [show.group === "recent" ? show : null, this._recentFromShow(show)])
+      .flatMap((show) => [this._recentNextFromShow(show), this._recentFromShow(show)])
       .filter((show) => show !== null)
       .filter((show, index, array) => array.findIndex((other) =>
         other.entityId === show.entityId &&
@@ -225,8 +225,6 @@ class TVShowMonitorPanel extends HTMLElement {
     if (!host || !this._manageOpen) return;
 
     const previousBody = host.querySelector(".dialog-body");
-    const previousSearch = host.querySelector("#show-search");
-    if (previousSearch && !this._manageBusy) this._searchQuery = previousSearch.value;
     if (previousBody) this._manageScrollTop = previousBody.scrollTop;
 
     host.innerHTML = `
@@ -261,6 +259,10 @@ class TVShowMonitorPanel extends HTMLElement {
 
     const searchForm = host.querySelector("#show-search-form");
     if (searchForm) searchForm.addEventListener("submit", (event) => this._searchShows(event));
+    const searchInput = host.querySelector("#show-search");
+    if (searchInput) searchInput.addEventListener("input", () => {
+      this._searchQuery = searchInput.value;
+    });
 
     host.querySelectorAll("[data-remove-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -513,6 +515,13 @@ class TVShowMonitorPanel extends HTMLElement {
       hasEpisode,
       recentEpisode: false,
     };
+  }
+
+  _recentNextFromShow(show) {
+    if (show.group !== "recent") return null;
+    const localDate = show.airing ? this._dateKey(show.airing) : show.attr.air_date;
+    const dayDifference = this._dayDifference(this._dateKey(new Date()), localDate);
+    return dayDifference === 0 || dayDifference === -1 ? show : null;
   }
 
   _recentFromShow(show) {
