@@ -77,6 +77,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         self._airing_listeners: dict[int, Callable[[], None]] = {}
         self._startup_events_ready = True
         self._cancel_started_listener: Callable[[], None] | None = None
+        self._startup_events: dict[
+            tuple[str, int, str], tuple[ConfiguredShow, LastKnownState]
+        ] = {}
 
     async def _async_setup(self) -> None:
         """Restore valid state and prune deliberately removed shows."""
@@ -130,6 +133,9 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
         self._cancel_started_listener = None
         self._startup_events_ready = True
         changed = False
+        for (event_type, _show_id, key), (show, state) in self._startup_events.items():
+            changed = self._emit_episode_event(show, state, key, event_type) or changed
+        self._startup_events.clear()
         for show in self.shows:
             changed = self._fire_episode_today_if_due(show) or changed
             changed = self._catch_up_episode_airing_if_due(show) or changed
@@ -328,8 +334,6 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
 
     def _fire_episode_today_if_due(self, show: ConfiguredShow) -> bool:
         """Fire once when a scheduled episode airs today in Home Assistant time."""
-        if not self._startup_events_ready:
-            return False
         state = self._states.get(show.tvmaze_id)
         if state is None or state.episode is None:
             return False
@@ -342,17 +346,10 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             != dt_util.now().date().isoformat()
         ):
             return False
-        self.hass.bus.async_fire(
-            EVENT_EPISODE_TODAY,
-            _episode_event_data(show, state, episode),
-        )
-        self._states[show.tvmaze_id] = replace(state, episode_today_fired_key=key)
-        return True
+        return self._emit_episode_event(show, state, key, EVENT_EPISODE_TODAY)
 
     def _catch_up_episode_airing_if_due(self, show: ConfiguredShow) -> bool:
         """Fire a recently missed exact airing event after restart."""
-        if not self._startup_events_ready:
-            return False
         state = self._states.get(show.tvmaze_id)
         if state is None or state.episode is None or state.episode.air_stamp is None:
             return False
@@ -400,11 +397,32 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
             return False
         if state.episode_airing_fired_key == key:
             return False
+        return self._emit_episode_event(show, state, key, EVENT_EPISODE_AIRING)
+
+    def _emit_episode_event(
+        self, show: ConfiguredShow, state: LastKnownState, key: str, event_type: str
+    ) -> bool:
+        """Retain due events across startup refreshes until automations are ready."""
+        if state.episode is None:
+            return False
+        if not self._startup_events_ready:
+            self._startup_events[event_type, show.tvmaze_id, key] = (show, state)
+            return False
         self.hass.bus.async_fire(
-            EVENT_EPISODE_AIRING,
-            _episode_event_data(show, state, state.episode),
+            event_type, _episode_event_data(show, state, state.episode)
         )
-        self._states[show.tvmaze_id] = replace(state, episode_airing_fired_key=key)
+        # A startup refresh may already have advanced the schedule. Only mark
+        # delivery on the current state when it still describes this event.
+        current = self._states[show.tvmaze_id]
+        if event_type == EVENT_EPISODE_TODAY:
+            if _episode_today_key(current.episode, self.hass.config.time_zone) == key:
+                self._states[show.tvmaze_id] = replace(
+                    current, episode_today_fired_key=key
+                )
+        elif _episode_airing_key(current.episode) == key:
+            self._states[show.tvmaze_id] = replace(
+                current, episode_airing_fired_key=key
+            )
         return True
 
     async def _async_fire_episode_airing(self, show: ConfiguredShow, key: str) -> None:
@@ -414,6 +432,7 @@ class TVShowMonitorCoordinator(DataUpdateCoordinator[dict[int, ShowUpdateResult]
 
     async def async_shutdown(self) -> None:
         """Cancel integration-owned time listeners."""
+        self._startup_events.clear()
         if self._cancel_started_listener is not None:
             self._cancel_started_listener()
             self._cancel_started_listener = None
