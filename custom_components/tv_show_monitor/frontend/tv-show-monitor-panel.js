@@ -16,6 +16,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._changeMatchId = null;
     this._manageScrollTop = 0;
     this._lastStableShows = null;
     this._showMutationExpectedCount = null;
@@ -190,7 +191,7 @@ class TVShowMonitorPanel extends HTMLElement {
     if (this._viewerFilter !== "next7") return true;
     if (show.group !== "today" && show.group !== "upcoming") return false;
     const key = show.airing ? this._dateKey(show.airing) : show.attr.air_date;
-    if (typeof key !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(key)) return false;
+    if (typeof key !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
     const days = this._dayDifference(this._dateKey(new Date()), key);
     return days >= 0 && days < 7;
   }
@@ -223,6 +224,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._changeMatchId = null;
     this._manageScrollTop = 0;
     this._renderManage();
 
@@ -252,6 +254,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageWarning = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._changeMatchId = null;
     this._pendingAction = null;
     this._cancelShowMutation();
     this._manageScrollTop = 0;
@@ -272,7 +275,7 @@ class TVShowMonitorPanel extends HTMLElement {
           <div class="dialog-header">
             <div>
               <h2 id="manage-title">Manage shows</h2>
-              <p>Add or remove followed shows without leaving the viewer.</p>
+              <p>Add, remove or correct show matches without leaving the viewer.</p>
             </div>
             <button id="close-manage" class="icon-button" type="button" aria-label="Close">×</button>
           </div>
@@ -320,7 +323,31 @@ class TVShowMonitorPanel extends HTMLElement {
       button.addEventListener("click", () => this._removeShow(Number(button.dataset.confirmRemove)));
     });
     host.querySelectorAll("[data-add-id]").forEach((button) => {
-      button.addEventListener("click", () => this._addShow(Number(button.dataset.addId)));
+      button.addEventListener("click", () => {
+        if (this._changeMatchId !== null) this._changeShowMatch(Number(button.dataset.addId));
+        else this._addShow(Number(button.dataset.addId));
+      });
+    });
+    host.querySelectorAll("[data-change-match-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = Number(button.dataset.changeMatchId);
+        const show = this._manageData?.shows?.find((item) => Number(item.tvmaze_id) === id);
+        if (!show) return;
+        this._changeMatchId = id;
+        this._pendingRemoveId = null;
+        this._searchQuery = show.entered_name || show.canonical_name;
+        this._searchResults = null;
+        this._manageError = "";
+        this._renderManage();
+        this.shadowRoot.querySelector("#show-search")?.focus?.();
+      });
+    });
+    host.querySelector("#cancel-change-match")?.addEventListener("click", () => {
+      this._changeMatchId = null;
+      this._searchQuery = "";
+      this._searchResults = null;
+      this._manageError = "";
+      this._renderManage();
     });
   }
 
@@ -339,12 +366,16 @@ class TVShowMonitorPanel extends HTMLElement {
         ${shows.length ? `<div class="manage-list">${shows.map((show) => this._manageShowRow(show)).join("")}</div>` : `<div class="inline-empty">No shows are currently being monitored.</div>`}
       </section>
       <section class="manage-section">
-        <h3>Add a show</h3>
+        <div class="manage-section-heading">
+          <h3>${this._changeMatchId !== null ? "Change TVmaze match" : "Add a show"}</h3>
+          ${this._changeMatchId !== null ? `<button id="cancel-change-match" type="button" class="text-button" ${this._manageBusy ? "disabled" : ""}>Cancel</button>` : ""}
+        </div>
+        ${this._changeMatchId !== null ? `<div class="helper">Choose a new TVmaze result for ${this._escape(shows.find((show) => Number(show.tvmaze_id) === this._changeMatchId)?.canonical_name || "this show")}.</div>` : ""}
         <form id="show-search-form" class="search-form">
-          <input id="show-search" type="search" maxlength="100" autocomplete="off" placeholder="Search TVmaze by show title" value="${this._escapeAttr(this._searchQuery)}" ${this._manageBusy || atLimit ? "disabled" : ""}>
-          <button class="primary-button" type="submit" ${this._manageBusy || atLimit ? "disabled" : ""}>${this._manageBusy ? "Working…" : "Search"}</button>
+          <input id="show-search" type="search" maxlength="100" autocomplete="off" placeholder="Search TVmaze by show title" value="${this._escapeAttr(this._searchQuery)}" ${this._manageBusy || (atLimit && this._changeMatchId === null) ? "disabled" : ""}>
+          <button class="primary-button" type="submit" ${this._manageBusy || (atLimit && this._changeMatchId === null) ? "disabled" : ""}>${this._manageBusy ? "Working…" : "Search"}</button>
         </form>
-        ${atLimit ? `<div class="helper">You have reached the ${data.max_shows}-show limit.</div>` : ""}
+        ${atLimit && this._changeMatchId === null ? `<div class="helper">You have reached the ${data.max_shows}-show limit.</div>` : ""}
         ${this._searchResults === null ? "" : this._searchResultsMarkup()}
       </section>
     `;
@@ -375,7 +406,10 @@ class TVShowMonitorPanel extends HTMLElement {
           <strong>${this._escape(show.canonical_name)}</strong>
           ${entered}
         </div>
-        <button class="text-button danger-text" type="button" data-remove-id="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+        <div class="row-actions">
+          <button class="text-button" type="button" data-change-match-id="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Change match</button>
+          <button class="text-button danger-text" type="button" data-remove-id="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+        </div>
       </div>
     `;
   }
@@ -395,13 +429,20 @@ class TVShowMonitorPanel extends HTMLElement {
       candidate.status,
     ].filter(Boolean).join(" · ");
     const alreadyAdded = candidate.already_added === true;
+    const isCurrent = this._changeMatchId !== null &&
+      Number(candidate.tvmaze_id) === this._changeMatchId;
+    const unavailable = alreadyAdded || this._manageBusy;
+    const actionLabel = isCurrent ? "Current" : alreadyAdded ? "Already followed" :
+      this._pendingAction?.id === Number(candidate.tvmaze_id) ?
+        (this._changeMatchId !== null ? "Changing…" : "Adding…") :
+        this._changeMatchId !== null ? "Use match" : "Add";
     return `
       <div class="candidate-row">
         <div class="row-copy">
           <strong>${this._escape(candidate.name)}</strong>
           ${details ? `<span class="row-meta">${this._escape(details)}</span>` : ""}
         </div>
-        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${alreadyAdded || this._manageBusy ? "disabled" : ""}>${alreadyAdded ? "Added" : this._pendingAction?.type === "add" && this._pendingAction.id === Number(candidate.tvmaze_id) ? "Adding…" : "Add"}</button>
+        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${unavailable ? "disabled" : ""}>${actionLabel}</button>
       </div>
     `;
   }
@@ -499,6 +540,50 @@ class TVShowMonitorPanel extends HTMLElement {
       if (result.reloaded === false) {
         this._cancelShowMutation();
         this._manageWarning = "The removal was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
+      } else {
+        this._showMutationExpectedCount = null;
+        this._renderContent();
+      }
+    } catch (error) {
+      if (generation === this._manageGeneration) {
+        this._cancelShowMutation();
+        this._manageError = this._errorText(error);
+      }
+    } finally {
+      if (generation === this._manageGeneration) {
+        this._pendingAction = null;
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
+    }
+  }
+
+  async _changeShowMatch(tvmazeId) {
+    if (this._manageBusy || this._changeMatchId === null || !this._searchQuery) return;
+    const oldId = this._changeMatchId;
+    const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
+    this._beginShowMutation(currentCount);
+    this._pendingAction = { type: "change", id: tvmazeId };
+    const generation = this._manageGeneration;
+    this._manageBusy = true;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._renderManage();
+    try {
+      const result = await this._hass.callWS({
+        type: `${DOMAIN}/change_match`,
+        old_tvmaze_id: oldId,
+        tvmaze_id: tvmazeId,
+        query: this._searchQuery,
+      });
+      if (generation !== this._manageGeneration) return;
+      this._manageData = result;
+      this._changeMatchId = null;
+      this._searchQuery = "";
+      this._searchResults = null;
+      if (result.reloaded === false) {
+        this._cancelShowMutation();
+        this._manageWarning = "The new match was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
         this._showMutationExpectedCount = null;
         this._renderContent();
@@ -821,7 +906,7 @@ class TVShowMonitorPanel extends HTMLElement {
       .row-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
       .row-copy strong { font-size: 14px; line-height: 1.3; }
       .row-meta { color: var(--secondary-text-color); font-size: 13px; line-height: 1.35; }
-      .row-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+      .row-actions { display: flex; gap: 8px; flex: 0 0 auto; flex-wrap: wrap; }
       .search-form { display: flex; gap: 8px; }
       .search-form input { min-width: 0; flex: 1 1 auto; height: 40px; padding: 0 11px; border: 1px solid var(--divider-color); border-radius: 9px; background: var(--primary-background-color); color: var(--primary-text-color); outline: none; }
       .search-form input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
@@ -848,6 +933,7 @@ class TVShowMonitorPanel extends HTMLElement {
         .manage-dialog { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; }
         .dialog-header, .dialog-body { padding-left: 16px; padding-right: 16px; }
         .manage-row, .candidate-row { align-items: flex-start; }
+      .manage-row { flex-wrap: wrap; }
         .confirm-row { flex-direction: column; }
         .search-form { flex-direction: column; }
         .search-form .primary-button { align-self: flex-end; }
