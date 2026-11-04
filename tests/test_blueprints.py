@@ -48,9 +48,7 @@ def test_blueprints_parse_and_use_supported_event_contracts(
     assert document["actions"][0]["target"]["entity_id"] == {
         "blueprint_input": "notify_entity"
     }
-    assert document["variables"]["selected_show"] == {
-        "blueprint_input": "show_filter"
-    }
+    assert document["variables"]["selected_show"] == {"blueprint_input": "show_filter"}
     assert document["mode"] == "queued"
 
     configured_events = set()
