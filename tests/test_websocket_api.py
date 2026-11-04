@@ -246,7 +246,9 @@ async def test_management_reload_failure_keeps_saved_changes_but_clears_flag(
     assert key not in hass.data
 
 
-async def test_change_match_replaces_only_selected_show(hass, hass_ws_client, severance):
+async def test_change_match_replaces_only_selected_show(
+    hass, hass_ws_client, severance
+):
     """Viewer rematch preserves other shows and the polling interval."""
     other = candidate(2, "Doctor Who").as_configured_show("Doctor Who")
     entry = MockConfigEntry(
