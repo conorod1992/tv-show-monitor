@@ -725,6 +725,9 @@ class TVShowMonitorPanel extends HTMLElement {
   _freshnessWarning(show) {
     const attr = show.attr;
     if (attr.last_attempt_successful === false) {
+      if (show.state.state === "unavailable" || show.state.state === "unknown") {
+        return "Latest update failed; schedule is not yet available.";
+      }
       return "Latest update failed; showing the last known schedule.";
     }
     // A successful check without a fresh schedule is normal for ended shows.
@@ -802,6 +805,7 @@ class TVShowMonitorPanel extends HTMLElement {
   }
 
   _noEpisodeText(status, state) {
+    if (state === "unavailable" || state === "unknown") return "Schedule unavailable";
     if (status === "Ended" || state === "Ended") return "No more episodes scheduled";
     if (status === "In Development") return "In development";
     if (status === "To Be Determined") return "Schedule to be confirmed";
