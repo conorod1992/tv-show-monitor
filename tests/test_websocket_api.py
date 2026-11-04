@@ -16,6 +16,7 @@ from custom_components.tv_show_monitor.const import (
 )
 from custom_components.tv_show_monitor.websocket_api import (
     WS_ADD,
+    WS_CHANGE_MATCH,
     WS_CONFIG,
     WS_REMOVE,
     WS_SEARCH,
@@ -48,6 +49,7 @@ async def _management_client(hass, hass_ws_client):
         {"type": WS_SEARCH, "query": ""},
         {"type": WS_SEARCH, "query": "x" * 101},
         {"type": WS_ADD, "query": "Severance", "tvmaze_id": 0},
+        {"type": WS_CHANGE_MATCH, "query": "Show", "tvmaze_id": 2, "old_tvmaze_id": 0},
     ],
 )
 async def test_invalid_management_messages_are_rejected_by_schema(
@@ -242,3 +244,132 @@ async def test_management_reload_failure_keeps_saved_changes_but_clears_flag(
     assert response["result"]["reloaded"] is False
     assert entry.options[CONF_SHOWS] == []
     assert key not in hass.data
+
+
+async def test_change_match_replaces_only_selected_show(hass, hass_ws_client, severance):
+    """Viewer rematch preserves other shows and the polling interval."""
+    other = candidate(2, "Doctor Who").as_configured_show("Doctor Who")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict(), other.as_dict()]},
+        options={
+            CONF_SHOWS: [severance.as_dict(), other.as_dict()],
+            CONF_POLL_INTERVAL: 72,
+        },
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    with (
+        patch.object(
+            TVMazeClient,
+            "async_search_shows",
+            AsyncMock(return_value=[candidate(4, "Severance (2026)")]),
+        ) as search,
+        patch.object(
+            hass.config_entries, "async_reload", AsyncMock(return_value=True)
+        ) as reload_entry,
+    ):
+        await client.send_json_auto_id(
+            {
+                "type": WS_CHANGE_MATCH,
+                "old_tvmaze_id": 216,
+                "tvmaze_id": 4,
+                "query": "Severance (2026)",
+            }
+        )
+        response = await client.receive_json()
+
+    assert response["success"] is True
+    assert response["result"]["reloaded"] is True
+    assert [show["tvmaze_id"] for show in entry.options[CONF_SHOWS]] == [4, 2]
+    assert entry.options[CONF_POLL_INTERVAL] == 72
+    search.assert_awaited_once_with("Severance (2026)")
+    reload_entry.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_change_match_rejects_existing_or_unverified_match(
+    hass, hass_ws_client, severance
+):
+    """An invalid selection must never remove the original show."""
+    other = candidate(2, "Doctor Who").as_configured_show("Doctor Who")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict(), other.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict(), other.as_dict()]},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    with (
+        patch.object(
+            TVMazeClient,
+            "async_search_shows",
+            AsyncMock(return_value=[candidate(2, "Doctor Who")]),
+        ),
+        patch.object(hass.config_entries, "async_reload", AsyncMock()) as reload_entry,
+    ):
+        await client.send_json_auto_id(
+            {
+                "type": WS_CHANGE_MATCH,
+                "old_tvmaze_id": 216,
+                "tvmaze_id": 2,
+                "query": "Doctor Who",
+            }
+        )
+        duplicate = await client.receive_json()
+        await client.send_json_auto_id(
+            {
+                "type": WS_CHANGE_MATCH,
+                "old_tvmaze_id": 216,
+                "tvmaze_id": 3,
+                "query": "Doctor Who",
+            }
+        )
+        unverified = await client.receive_json()
+    assert duplicate["success"] is False
+    assert duplicate["error"]["code"] == "duplicate_show"
+    assert unverified["success"] is False
+    assert unverified["error"]["code"] == "invalid_selection"
+    assert [show["tvmaze_id"] for show in entry.options[CONF_SHOWS]] == [216, 2]
+    reload_entry.assert_not_awaited()
+
+
+async def test_change_match_does_not_resurrect_a_deleted_show(
+    hass, hass_ws_client, severance
+):
+    """A delayed rematch must not recreate a show removed by another manager."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()]},
+    )
+    entry.add_to_hass(hass)
+    client = await _management_client(hass, hass_ws_client)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_search(_query):
+        started.set()
+        await release.wait()
+        return [candidate(4, "Severance new")]
+
+    with (
+        patch.object(TVMazeClient, "async_search_shows", side_effect=slow_search),
+        patch.object(hass.config_entries, "async_reload", AsyncMock()) as reload_entry,
+    ):
+        await client.send_json_auto_id(
+            {
+                "type": WS_CHANGE_MATCH,
+                "old_tvmaze_id": 216,
+                "tvmaze_id": 4,
+                "query": "Severance new",
+            }
+        )
+        await started.wait()
+        hass.config_entries.async_update_entry(entry, options={CONF_SHOWS: []})
+        release.set()
+        response = await client.receive_json()
+
+    assert response["success"] is False
+    assert response["error"]["code"] == "unknown_show"
+    assert entry.options[CONF_SHOWS] == []
+    reload_entry.assert_not_awaited()
