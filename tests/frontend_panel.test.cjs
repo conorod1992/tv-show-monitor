@@ -188,6 +188,12 @@ function checkViewerFiltersAndStaleness() {
   unscheduled.attr.last_attempt_successful = true;
   assert.equal(viewer._freshnessWarning(unscheduled), "",
     "ended shows are not flagged for intentionally infrequent checks");
+  const unavailable = showState("First check failed", null);
+  unavailable.state = "unavailable";
+  unavailable.attributes.last_attempt_successful = false;
+  const firstCheck = viewer._showFromState("sensor.failed", unavailable);
+  assert.match(viewer._freshnessWarning(firstCheck), /not yet available/);
+  assert.equal(viewer._noEpisodeText(null, "unavailable"), "Schedule unavailable");
 }
 
 async function checkViewerRematch() {
