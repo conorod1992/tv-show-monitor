@@ -7,6 +7,8 @@ class TVShowMonitorPanel extends HTMLElement {
     this._hass = null;
     this._initialized = false;
     this._manageOpen = false;
+    this._viewerQuery = "";
+    this._viewerFilter = "all";
     this._manageData = null;
     this._manageBusy = false;
     this._manageError = "";
@@ -81,11 +83,33 @@ class TVShowMonitorPanel extends HTMLElement {
           </div>
           <button id="manage-shows" class="manage-button" type="button" hidden>Manage shows</button>
         </header>
+        <div class="viewer-controls" role="group" aria-label="Filter monitored shows">
+          <label class="visually-hidden" for="viewer-search">Search monitored shows</label>
+          <input id="viewer-search" type="search" autocomplete="off" placeholder="Search followed shows…" aria-label="Search monitored shows">
+          <div class="viewer-filter-buttons">
+            <button type="button" data-view-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-view-filter="next7" aria-pressed="false">Next 7 days</button>
+            <button type="button" data-view-filter="unscheduled" aria-pressed="false">Not scheduled</button>
+          </div>
+        </div>
         <div id="content"></div>
       </div>
       <div id="dialog-host"></div>
     `;
     this.shadowRoot.querySelector("#manage-shows").addEventListener("click", () => this._openManage());
+    this.shadowRoot.querySelector("#viewer-search").addEventListener("input", (event) => {
+      this._viewerQuery = event.target.value;
+      this._renderContent();
+    });
+    this.shadowRoot.querySelectorAll("[data-view-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._viewerFilter = button.dataset.viewFilter;
+        this.shadowRoot.querySelectorAll("[data-view-filter]").forEach((option) => {
+          option.setAttribute("aria-pressed", String(option === button));
+        });
+        this._renderContent();
+      });
+    });
     this._initialized = true;
   }
 
@@ -111,9 +135,10 @@ class TVShowMonitorPanel extends HTMLElement {
       this._lastStableShows = shows;
     }
 
-    const today = shows.filter((show) => show.group === "today");
-    const upcoming = shows.filter((show) => show.group === "upcoming");
-    const recent = shows
+    const visibleShows = shows.filter((show) => this._viewerIncludes(show));
+    const today = visibleShows.filter((show) => show.group === "today");
+    const upcoming = visibleShows.filter((show) => show.group === "upcoming");
+    const recent = visibleShows
       .flatMap((show) => [this._recentNextFromShow(show), this._recentFromShow(show)])
       .filter((show) => show !== null)
       .filter((show, index, array) => array.findIndex((other) =>
@@ -122,12 +147,13 @@ class TVShowMonitorPanel extends HTMLElement {
         (show.recentEpisode ? show.attr.previous_episode_id : show.attr.episode_id)
       ) === index)
       .sort((a, b) => (b.airing?.getTime() ?? 0) - (a.airing?.getTime() ?? 0) || a.name.localeCompare(b.name));
-    const unscheduled = shows.filter((show) => show.group === "unscheduled");
-    const ended = shows.filter((show) => show.group === "ended");
+    const unscheduled = visibleShows.filter((show) => show.group === "unscheduled");
+    const ended = visibleShows.filter((show) => show.group === "ended");
 
     const content = this.shadowRoot.querySelector("#content");
     content.innerHTML = `
       ${shows.length === 0 ? this._emptyState() : ""}
+      ${shows.length > 0 && visibleShows.length === 0 ? '<div class="empty">No shows match these filters.</div>' : ""}
       ${this._section("Today", today)}
       ${this._section("Coming up", upcoming)}
       ${this._section("Recent", recent)}
@@ -154,6 +180,19 @@ class TVShowMonitorPanel extends HTMLElement {
         openDetails();
       });
     });
+  }
+
+  _viewerIncludes(show) {
+    if (this._viewerQuery.trim() && !show.name.toLocaleLowerCase().includes(this._viewerQuery.trim().toLocaleLowerCase())) {
+      return false;
+    }
+    if (this._viewerFilter === "unscheduled") return show.group === "unscheduled";
+    if (this._viewerFilter !== "next7") return true;
+    if (show.group !== "today" && show.group !== "upcoming") return false;
+    const key = show.airing ? this._dateKey(show.airing) : show.attr.air_date;
+    if (typeof key !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(key)) return false;
+    const days = this._dayDifference(this._dateKey(new Date()), key);
+    return days >= 0 && days < 7;
   }
 
   _beginShowMutation(expectedCount) {
@@ -570,6 +609,7 @@ class TVShowMonitorPanel extends HTMLElement {
       ? `Final episode: ${attr.final_episode_code}${attr.final_episode_name ? ` · ${attr.final_episode_name}` : ""}`
       : "";
     const runtime = recentEpisode ? null : attr.runtime;
+    const freshness = this._freshnessWarning(show);
 
     return `
       <article class="card" data-entity-id="${this._escapeAttr(show.entityId)}" tabindex="0" role="button" aria-label="Open ${this._escapeAttr(show.name)} details">
@@ -583,9 +623,28 @@ class TVShowMonitorPanel extends HTMLElement {
           ${channel ? `<div class="detail">${this._escape(channel)}</div>` : ""}
           ${finalEpisode ? `<div class="detail muted">${this._escape(finalEpisode)}</div>` : ""}
           ${runtime ? `<div class="detail muted">${this._escape(String(runtime))} min</div>` : ""}
+          ${freshness ? `<div class="detail stale-warning" role="status">${this._escape(freshness)}</div>` : ""}
         </div>
       </article>
     `;
+  }
+
+  _freshnessWarning(show) {
+    const attr = show.attr;
+    if (attr.last_attempt_successful === false) {
+      return "Latest update failed; showing the last known schedule.";
+    }
+    // A successful check without a fresh schedule is normal for ended shows.
+    if (attr.show_status === "Ended" && !show.hasEpisode) return "";
+    const timestamp = Date.parse(attr.last_successful_update);
+    if (!Number.isFinite(timestamp)) return "";
+    const interval = Number(attr.poll_interval_hours);
+    if (!Number.isFinite(interval) || interval <= 0) return "";
+    const hours = (Date.now() - timestamp) / 3600000;
+    if (hours > Math.max(48, interval * 2 + 1)) {
+      return "Schedule may be outdated; the last successful check was overdue.";
+    }
+    return "";
   }
 
   _friendlyAiring(airing, attr) {
@@ -709,6 +768,15 @@ class TVShowMonitorPanel extends HTMLElement {
       button, input { font: inherit; }
       button { color: inherit; }
       .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+      .viewer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+      #viewer-search { flex: 1 1 230px; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--divider-color); border-radius: 9px; background: var(--card-background-color); color: var(--primary-text-color); }
+      #viewer-search:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      .viewer-filter-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+      .viewer-filter-buttons button { border: 1px solid var(--divider-color); border-radius: 9px; padding: 9px 12px; cursor: pointer; background: var(--card-background-color); }
+      .viewer-filter-buttons button[aria-pressed="true"] { border-color: var(--primary-color); background: var(--secondary-background-color); font-weight: 600; }
+      .viewer-filter-buttons button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      .stale-warning { margin-top: 4px; color: var(--warning-color, var(--primary-text-color)); font-size: 12px; }
       #content { position: relative; }
       header { margin-bottom: 28px; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
       .header-copy { min-width: 0; }
