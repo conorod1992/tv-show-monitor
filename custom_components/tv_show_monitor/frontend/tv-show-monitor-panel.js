@@ -20,6 +20,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageScrollTop = 0;
     this._lastStableShows = null;
     this._showMutationExpectedCount = null;
+    this._showMutationNewId = null;
     this._manageGeneration = 0;
     this._searchGeneration = 0;
     this._pendingAction = null;
@@ -125,8 +126,10 @@ class TVShowMonitorPanel extends HTMLElement {
 
     let updating = false;
     if (this._showMutationExpectedCount !== null) {
-      if (shows.length === this._showMutationExpectedCount) {
+      if (shows.length === this._showMutationExpectedCount &&
+          (this._showMutationNewId === null || shows.some((show) => Number(show.attr.tvmaze_show_id) === this._showMutationNewId))) {
         this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
         this._lastStableShows = shows;
       } else {
         updating = true;
@@ -196,13 +199,15 @@ class TVShowMonitorPanel extends HTMLElement {
     return days >= 0 && days < 7;
   }
 
-  _beginShowMutation(expectedCount) {
+  _beginShowMutation(expectedCount, newTvmazeId = null) {
     this._showMutationExpectedCount = Math.max(0, expectedCount);
+    this._showMutationNewId = newTvmazeId;
     this._renderContent();
   }
 
   _cancelShowMutation() {
     this._showMutationExpectedCount = null;
+    this._showMutationNewId = null;
     this._renderContent();
   }
 
@@ -505,6 +510,7 @@ class TVShowMonitorPanel extends HTMLElement {
         this._manageWarning = "The show was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
         this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
         this._renderContent();
       }
     } catch (error) {
@@ -542,6 +548,7 @@ class TVShowMonitorPanel extends HTMLElement {
         this._manageWarning = "The removal was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
         this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
         this._renderContent();
       }
     } catch (error) {
@@ -562,7 +569,7 @@ class TVShowMonitorPanel extends HTMLElement {
     if (this._manageBusy || this._changeMatchId === null || !this._searchQuery) return;
     const oldId = this._changeMatchId;
     const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
-    this._beginShowMutation(currentCount);
+    this._beginShowMutation(currentCount, tvmazeId);
     this._pendingAction = { type: "change", id: tvmazeId };
     const generation = this._manageGeneration;
     this._manageBusy = true;
@@ -586,6 +593,7 @@ class TVShowMonitorPanel extends HTMLElement {
         this._manageWarning = "The new match was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
         this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
         this._renderContent();
       }
     } catch (error) {
