@@ -71,6 +71,11 @@ class TVShowNextEpisodeSensor(TVShowMonitorEntity, SensorEntity):
             "web_channel": state.web_channel_name,
             "schedule_days": list(state.schedule_days),
             "schedule_time": state.schedule_time,
+            "poll_interval_hours": (
+                self.coordinator.update_interval.total_seconds() / 3600
+                if self.coordinator.update_interval is not None
+                else None
+            ),
             "last_successful_update": state.last_successful_update,
             "last_update_attempt": state.last_update_attempt,
             "last_attempt_successful": state.last_attempt_successful,
