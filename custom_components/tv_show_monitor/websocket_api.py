@@ -245,18 +245,21 @@ async def websocket_change_match(
     )
     if candidate is None:
         connection.send_error(
-            msg["id"], "invalid_selection", "The selected show is no longer in the results"
+            msg["id"],
+            "invalid_selection",
+            "The selected show is no longer in the results",
         )
         return
 
     # Search is asynchronous: use the current config, not the pre-search snapshot.
     current = _entry_shows(entry)
     if old_id not in {show.tvmaze_id for show in current}:
-        connection.send_error(msg["id"], "unknown_show", "That show is no longer followed")
+        connection.send_error(
+            msg["id"], "unknown_show", "That show is no longer followed"
+        )
         return
     if any(
-        show.tvmaze_id == selected_id and show.tvmaze_id != old_id
-        for show in current
+        show.tvmaze_id == selected_id and show.tvmaze_id != old_id for show in current
     ):
         connection.send_error(
             msg["id"], "duplicate_show", "That show is already being monitored"
@@ -264,9 +267,7 @@ async def websocket_change_match(
         return
 
     replacement = candidate.as_configured_show(query)
-    shows = tuple(
-        replacement if show.tvmaze_id == old_id else show for show in current
-    )
+    shows = tuple(replacement if show.tvmaze_id == old_id else show for show in current)
     if shows == current:
         connection.send_result(msg["id"], {**_config_payload(entry), "reloaded": True})
         return
