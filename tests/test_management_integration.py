@@ -18,6 +18,7 @@ from custom_components.tv_show_monitor.const import (
 )
 from custom_components.tv_show_monitor.websocket_api import (
     WS_ADD,
+    WS_CHANGE_MATCH,
     WS_REMOVE,
 )
 
@@ -162,4 +163,69 @@ async def test_websocket_add_remove_runs_real_ha_reload_and_registry_cleanup(
         assert stored["shows"] == {}
         assert schedule_client.async_get_show_schedule.await_count == 2
 
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_websocket_rematch_replaces_entity_device_and_cache(
+    hass, hass_ws_client, severance
+):
+    """A rematch must retire the old sensor/device without leaving cached data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_SHOWS: [severance.as_dict()]},
+        options={CONF_SHOWS: [severance.as_dict()], CONF_POLL_INTERVAL: 24},
+        entry_id="tv-show-monitor-rematch",
+    )
+    entry.add_to_hass(hass)
+    assert await async_setup_component(hass, "frontend", {})
+    client = await hass_ws_client(hass)
+    schedule_client = AsyncMock()
+    schedule_client.async_get_show_schedule.return_value = ShowScheduleInfo(
+        "Running", None, None
+    )
+
+    with (
+        patch(
+            "custom_components.tv_show_monitor.RateLimitedTVMazeClient",
+            return_value=schedule_client,
+        ),
+        patch(
+            "custom_components.tv_show_monitor.async_register_frontend",
+            new_callable=AsyncMock,
+        ),
+        patch("custom_components.tv_show_monitor.async_unregister_frontend"),
+        patch(
+            "custom_components.tv_show_monitor.websocket_api.TVMazeClient"
+        ) as search_client,
+    ):
+        search_client.return_value.async_search_shows = AsyncMock(
+            return_value=[_candidate(4, "Severance revised")]
+        )
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        before = _entity_ids(hass, entry)
+        assert set(before) == {f"{DOMAIN}_216_next_episode"}
+        assert len(_device_ids(hass, entry)) == 1
+        await client.send_json_auto_id(
+            {
+                "type": WS_CHANGE_MATCH,
+                "old_tvmaze_id": 216,
+                "tvmaze_id": 4,
+                "query": "Severance revised",
+            }
+        )
+        response = await client.receive_json()
+        assert response["success"], response
+        assert response["result"]["reloaded"] is True
+        await hass.async_block_till_done()
+
+        after = _entity_ids(hass, entry)
+        assert set(after) == {f"{DOMAIN}_4_next_episode"}
+        assert hass.states.get(before[f"{DOMAIN}_216_next_episode"]) is None
+        assert hass.states.get(after[f"{DOMAIN}_4_next_episode"]) is not None
+        assert len(_device_ids(hass, entry)) == 1
+        stored = await entry.runtime_data.coordinator._store.async_load()
+        assert set(stored["shows"]) == {"4"}
+        assert [show["tvmaze_id"] for show in entry.options[CONF_SHOWS]] == [4]
         assert await hass.config_entries.async_unload(entry.entry_id)
