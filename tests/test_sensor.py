@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,6 +20,7 @@ def make_sensor(severance, state):
     coordinator = MagicMock()
     coordinator.data = {216: ShowUpdateResult(severance, state)}
     coordinator.async_add_listener.return_value = lambda: None
+    coordinator.update_interval = timedelta(hours=48)
     return TVShowNextEpisodeSensor(coordinator, severance)
 
 
@@ -55,6 +56,7 @@ def test_date_state_stable_identity_attributes_device_and_artwork(severance, epi
     assert attributes["network"] == "Apple TV+"
     assert attributes["schedule_days"] == ["Friday"]
     assert attributes["schedule_time"] == "09:00"
+    assert attributes["poll_interval_hours"] == 48
     assert attributes["days_until"] == 2
     assert attributes["next_airing"] == episode.air_stamp
     assert attributes["previous_episode_name"] == episode.name
