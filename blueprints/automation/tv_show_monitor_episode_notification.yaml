@@ -1,0 +1,67 @@
+blueprint:
+  name: TV Show Monitor - Episode notification
+  description: >-
+    Notify when a monitored episode airs today or at its exact airing time.
+    Uses TV Show Monitor events and a Home Assistant notify entity.
+    Choose one event type per automation. Exact airing notifications require
+    an absolute timestamp from TVmaze.
+  domain: automation
+  input:
+    notify_entity:
+      name: Notify entity
+      description: A notification destination exposed as a notify entity.
+      selector:
+        entity:
+          filter:
+            - domain: notify
+    event_type:
+      name: Notification timing
+      default: tv_show_monitor_episode_today
+      selector:
+        select:
+          options:
+            - label: Episode airs today
+              value: tv_show_monitor_episode_today
+            - label: Episode is airing now
+              value: tv_show_monitor_episode_airing
+    show_filter:
+      name: Show name (optional)
+      description: Leave blank for all followed shows; otherwise enter the exact show name.
+      default: ""
+      selector:
+        text: {}
+
+variables:
+  selected_show: !input show_filter
+
+triggers:
+  - trigger: event
+    event_type: !input event_type
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ not (selected_show | trim) or
+         (trigger.event.data.show_name | default('', true) | lower) ==
+         (selected_show | trim | lower) }}
+
+actions:
+  - action: notify.send_message
+    target:
+      entity_id: !input notify_entity
+    data:
+      title: TV Show Monitor
+      message: >-
+        {{ trigger.event.data.show_name }}:
+        {{ trigger.event.data.episode_code or 'New episode' }}
+        {% if trigger.event.data.episode_name %}
+        — {{ trigger.event.data.episode_name }}
+        {% endif %}
+        {% if trigger.event.event_type == 'tv_show_monitor_episode_today' %}
+        airs today.
+        {% else %}
+        is airing now.
+        {% endif %}
+
+mode: queued
+max: 25
