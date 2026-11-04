@@ -217,6 +217,30 @@ async function checkViewerRematch() {
   assert.equal(editor._manageBusy, false);
 }
 
+function checkRematchViewerStability() {
+  const viewer = new Panel();
+  const content = { innerHTML: "", querySelectorAll: () => [] };
+  viewer.shadowRoot = { querySelector: () => content };
+  viewer._initialized = true;
+  const old = showState("Old match", new Date(Date.now() + 86400000).toISOString());
+  old.attributes.tvmaze_show_id = 216;
+  viewer._hass = { config: { time_zone: "UTC" }, locale: { language: "en-IE" }, states: { "sensor.old": old } };
+  viewer._renderContent();
+  viewer._beginShowMutation(1, 4);
+  assert.equal(viewer._showMutationExpectedCount, 1,
+    "same-count rematch must wait for the replacement identity");
+  viewer._hass.states = {};
+  viewer._renderContent();
+  assert.match(content.innerHTML, /Old match/, "old cards remain while replacement loads");
+  const replacement = showState("New match", new Date(Date.now() + 86400000).toISOString());
+  replacement.attributes.tvmaze_show_id = 4;
+  viewer._hass.states = { "sensor.new": replacement };
+  viewer._renderContent();
+  assert.equal(viewer._showMutationExpectedCount, null);
+  assert.match(content.innerHTML, /New match/);
+}
+
+checkRematchViewerStability();
 checkViewerFiltersAndStaleness();
 Promise.resolve()
   .then(checkViewerRematch)
