@@ -1,0 +1,58 @@
+blueprint:
+  name: TV Show Monitor - Schedule and status alerts
+  description: >-
+    Notify about meaningful TVmaze schedule corrections or show status changes.
+    These are emitted only after a known baseline is established. Uses a
+    Home Assistant notify entity, with an optional show-name filter.
+  domain: automation
+  input:
+    notify_entity:
+      name: Notify entity
+      description: A notification destination exposed as a notify entity.
+      selector:
+        entity:
+          filter:
+            - domain: notify
+    show_filter:
+      name: Show name (optional)
+      description: Leave blank for all followed shows; otherwise enter the exact show name.
+      default: ""
+      selector:
+        text: {}
+
+variables:
+  selected_show: !input show_filter
+
+triggers:
+  - trigger: event
+    event_type: tv_show_monitor_schedule_changed
+  - trigger: event
+    event_type: tv_show_monitor_status_changed
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ not (selected_show | trim) or
+         (trigger.event.data.show_name | default('', true) | lower) ==
+         (selected_show | trim | lower) }}
+
+actions:
+  - action: notify.send_message
+    target:
+      entity_id: !input notify_entity
+    data:
+      title: TV Show Monitor
+      message: >-
+        {% if trigger.event.event_type == 'tv_show_monitor_status_changed' %}
+        {{ trigger.event.data.show_name }} status changed:
+        {{ trigger.event.data.old_status }} → {{ trigger.event.data.new_status }}.
+        {% else %}
+        {{ trigger.event.data.show_name }} schedule:
+        {{ trigger.event.data.change_type | replace('_', ' ') }}.
+        {% if trigger.event.data.new_air_date %}
+        New air date: {{ trigger.event.data.new_air_date }}.
+        {% endif %}
+        {% endif %}
+
+mode: queued
+max: 25

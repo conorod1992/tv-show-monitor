@@ -7,6 +7,8 @@ class TVShowMonitorPanel extends HTMLElement {
     this._hass = null;
     this._initialized = false;
     this._manageOpen = false;
+    this._viewerQuery = "";
+    this._viewerFilter = "all";
     this._manageData = null;
     this._manageBusy = false;
     this._manageError = "";
@@ -14,9 +16,11 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._changeMatchId = null;
     this._manageScrollTop = 0;
     this._lastStableShows = null;
     this._showMutationExpectedCount = null;
+    this._showMutationNewId = null;
     this._manageGeneration = 0;
     this._searchGeneration = 0;
     this._pendingAction = null;
@@ -81,11 +85,33 @@ class TVShowMonitorPanel extends HTMLElement {
           </div>
           <button id="manage-shows" class="manage-button" type="button" hidden>Manage shows</button>
         </header>
+        <div class="viewer-controls" role="group" aria-label="Filter monitored shows">
+          <label class="visually-hidden" for="viewer-search">Search monitored shows</label>
+          <input id="viewer-search" type="search" autocomplete="off" placeholder="Search followed shows…" aria-label="Search monitored shows">
+          <div class="viewer-filter-buttons">
+            <button type="button" data-view-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-view-filter="next7" aria-pressed="false">Next 7 days</button>
+            <button type="button" data-view-filter="unscheduled" aria-pressed="false">Not scheduled</button>
+          </div>
+        </div>
         <div id="content"></div>
       </div>
       <div id="dialog-host"></div>
     `;
     this.shadowRoot.querySelector("#manage-shows").addEventListener("click", () => this._openManage());
+    this.shadowRoot.querySelector("#viewer-search").addEventListener("input", (event) => {
+      this._viewerQuery = event.target.value;
+      this._renderContent();
+    });
+    this.shadowRoot.querySelectorAll("[data-view-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._viewerFilter = button.dataset.viewFilter;
+        this.shadowRoot.querySelectorAll("[data-view-filter]").forEach((option) => {
+          option.setAttribute("aria-pressed", String(option === button));
+        });
+        this._renderContent();
+      });
+    });
     this._initialized = true;
   }
 
@@ -100,8 +126,10 @@ class TVShowMonitorPanel extends HTMLElement {
 
     let updating = false;
     if (this._showMutationExpectedCount !== null) {
-      if (shows.length === this._showMutationExpectedCount) {
+      if (shows.length === this._showMutationExpectedCount &&
+          (this._showMutationNewId === null || shows.some((show) => Number(show.attr.tvmaze_show_id) === this._showMutationNewId))) {
         this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
         this._lastStableShows = shows;
       } else {
         updating = true;
@@ -111,9 +139,10 @@ class TVShowMonitorPanel extends HTMLElement {
       this._lastStableShows = shows;
     }
 
-    const today = shows.filter((show) => show.group === "today");
-    const upcoming = shows.filter((show) => show.group === "upcoming");
-    const recent = shows
+    const visibleShows = shows.filter((show) => this._viewerIncludes(show));
+    const today = visibleShows.filter((show) => show.group === "today");
+    const upcoming = visibleShows.filter((show) => show.group === "upcoming");
+    const recent = visibleShows
       .flatMap((show) => [this._recentNextFromShow(show), this._recentFromShow(show)])
       .filter((show) => show !== null)
       .filter((show, index, array) => array.findIndex((other) =>
@@ -122,12 +151,13 @@ class TVShowMonitorPanel extends HTMLElement {
         (show.recentEpisode ? show.attr.previous_episode_id : show.attr.episode_id)
       ) === index)
       .sort((a, b) => (b.airing?.getTime() ?? 0) - (a.airing?.getTime() ?? 0) || a.name.localeCompare(b.name));
-    const unscheduled = shows.filter((show) => show.group === "unscheduled");
-    const ended = shows.filter((show) => show.group === "ended");
+    const unscheduled = visibleShows.filter((show) => show.group === "unscheduled");
+    const ended = visibleShows.filter((show) => show.group === "ended");
 
     const content = this.shadowRoot.querySelector("#content");
     content.innerHTML = `
       ${shows.length === 0 ? this._emptyState() : ""}
+      ${shows.length > 0 && visibleShows.length === 0 ? '<div class="empty">No shows match these filters.</div>' : ""}
       ${this._section("Today", today)}
       ${this._section("Coming up", upcoming)}
       ${this._section("Recent", recent)}
@@ -156,13 +186,28 @@ class TVShowMonitorPanel extends HTMLElement {
     });
   }
 
-  _beginShowMutation(expectedCount) {
+  _viewerIncludes(show) {
+    if (this._viewerQuery.trim() && !show.name.toLocaleLowerCase().includes(this._viewerQuery.trim().toLocaleLowerCase())) {
+      return false;
+    }
+    if (this._viewerFilter === "unscheduled") return show.group === "unscheduled";
+    if (this._viewerFilter !== "next7") return true;
+    if (show.group !== "today" && show.group !== "upcoming") return false;
+    const key = show.airing ? this._dateKey(show.airing) : show.attr.air_date;
+    if (typeof key !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+    const days = this._dayDifference(this._dateKey(new Date()), key);
+    return days >= 0 && days < 7;
+  }
+
+  _beginShowMutation(expectedCount, newTvmazeId = null) {
     this._showMutationExpectedCount = Math.max(0, expectedCount);
+    this._showMutationNewId = newTvmazeId;
     this._renderContent();
   }
 
   _cancelShowMutation() {
     this._showMutationExpectedCount = null;
+    this._showMutationNewId = null;
     this._renderContent();
   }
 
@@ -184,6 +229,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._searchQuery = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._changeMatchId = null;
     this._manageScrollTop = 0;
     this._renderManage();
 
@@ -213,6 +259,7 @@ class TVShowMonitorPanel extends HTMLElement {
     this._manageWarning = "";
     this._searchResults = null;
     this._pendingRemoveId = null;
+    this._changeMatchId = null;
     this._pendingAction = null;
     this._cancelShowMutation();
     this._manageScrollTop = 0;
@@ -233,7 +280,7 @@ class TVShowMonitorPanel extends HTMLElement {
           <div class="dialog-header">
             <div>
               <h2 id="manage-title">Manage shows</h2>
-              <p>Add or remove followed shows without leaving the viewer.</p>
+              <p>Add, remove or correct show matches without leaving the viewer.</p>
             </div>
             <button id="close-manage" class="icon-button" type="button" aria-label="Close">×</button>
           </div>
@@ -281,7 +328,31 @@ class TVShowMonitorPanel extends HTMLElement {
       button.addEventListener("click", () => this._removeShow(Number(button.dataset.confirmRemove)));
     });
     host.querySelectorAll("[data-add-id]").forEach((button) => {
-      button.addEventListener("click", () => this._addShow(Number(button.dataset.addId)));
+      button.addEventListener("click", () => {
+        if (this._changeMatchId !== null) this._changeShowMatch(Number(button.dataset.addId));
+        else this._addShow(Number(button.dataset.addId));
+      });
+    });
+    host.querySelectorAll("[data-change-match-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = Number(button.dataset.changeMatchId);
+        const show = this._manageData?.shows?.find((item) => Number(item.tvmaze_id) === id);
+        if (!show) return;
+        this._changeMatchId = id;
+        this._pendingRemoveId = null;
+        this._searchQuery = show.entered_name || show.canonical_name;
+        this._searchResults = null;
+        this._manageError = "";
+        this._renderManage();
+        this.shadowRoot.querySelector("#show-search")?.focus?.();
+      });
+    });
+    host.querySelector("#cancel-change-match")?.addEventListener("click", () => {
+      this._changeMatchId = null;
+      this._searchQuery = "";
+      this._searchResults = null;
+      this._manageError = "";
+      this._renderManage();
     });
   }
 
@@ -300,12 +371,16 @@ class TVShowMonitorPanel extends HTMLElement {
         ${shows.length ? `<div class="manage-list">${shows.map((show) => this._manageShowRow(show)).join("")}</div>` : `<div class="inline-empty">No shows are currently being monitored.</div>`}
       </section>
       <section class="manage-section">
-        <h3>Add a show</h3>
+        <div class="manage-section-heading">
+          <h3>${this._changeMatchId !== null ? "Change TVmaze match" : "Add a show"}</h3>
+          ${this._changeMatchId !== null ? `<button id="cancel-change-match" type="button" class="text-button" ${this._manageBusy ? "disabled" : ""}>Cancel</button>` : ""}
+        </div>
+        ${this._changeMatchId !== null ? `<div class="helper">Choose a new TVmaze result for ${this._escape(shows.find((show) => Number(show.tvmaze_id) === this._changeMatchId)?.canonical_name || "this show")}.</div>` : ""}
         <form id="show-search-form" class="search-form">
-          <input id="show-search" type="search" maxlength="100" autocomplete="off" placeholder="Search TVmaze by show title" value="${this._escapeAttr(this._searchQuery)}" ${this._manageBusy || atLimit ? "disabled" : ""}>
-          <button class="primary-button" type="submit" ${this._manageBusy || atLimit ? "disabled" : ""}>${this._manageBusy ? "Working…" : "Search"}</button>
+          <input id="show-search" type="search" maxlength="100" autocomplete="off" placeholder="Search TVmaze by show title" value="${this._escapeAttr(this._searchQuery)}" ${this._manageBusy || (atLimit && this._changeMatchId === null) ? "disabled" : ""}>
+          <button class="primary-button" type="submit" ${this._manageBusy || (atLimit && this._changeMatchId === null) ? "disabled" : ""}>${this._manageBusy ? "Working…" : "Search"}</button>
         </form>
-        ${atLimit ? `<div class="helper">You have reached the ${data.max_shows}-show limit.</div>` : ""}
+        ${atLimit && this._changeMatchId === null ? `<div class="helper">You have reached the ${data.max_shows}-show limit.</div>` : ""}
         ${this._searchResults === null ? "" : this._searchResultsMarkup()}
       </section>
     `;
@@ -336,7 +411,10 @@ class TVShowMonitorPanel extends HTMLElement {
           <strong>${this._escape(show.canonical_name)}</strong>
           ${entered}
         </div>
-        <button class="text-button danger-text" type="button" data-remove-id="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+        <div class="row-actions">
+          <button class="text-button" type="button" data-change-match-id="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Change match</button>
+          <button class="text-button danger-text" type="button" data-remove-id="${this._escapeAttr(show.tvmaze_id)}" ${this._manageBusy ? "disabled" : ""}>Remove</button>
+        </div>
       </div>
     `;
   }
@@ -356,13 +434,20 @@ class TVShowMonitorPanel extends HTMLElement {
       candidate.status,
     ].filter(Boolean).join(" · ");
     const alreadyAdded = candidate.already_added === true;
+    const isCurrent = this._changeMatchId !== null &&
+      Number(candidate.tvmaze_id) === this._changeMatchId;
+    const unavailable = alreadyAdded || this._manageBusy;
+    const actionLabel = isCurrent ? "Current" : alreadyAdded ? "Already followed" :
+      this._pendingAction?.id === Number(candidate.tvmaze_id) ?
+        (this._changeMatchId !== null ? "Changing…" : "Adding…") :
+        this._changeMatchId !== null ? "Use match" : "Add";
     return `
       <div class="candidate-row">
         <div class="row-copy">
           <strong>${this._escape(candidate.name)}</strong>
           ${details ? `<span class="row-meta">${this._escape(details)}</span>` : ""}
         </div>
-        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${alreadyAdded || this._manageBusy ? "disabled" : ""}>${alreadyAdded ? "Added" : this._pendingAction?.type === "add" && this._pendingAction.id === Number(candidate.tvmaze_id) ? "Adding…" : "Add"}</button>
+        <button class="${alreadyAdded ? "secondary-button" : "primary-button"}" type="button" data-add-id="${this._escapeAttr(candidate.tvmaze_id)}" ${unavailable ? "disabled" : ""}>${actionLabel}</button>
       </div>
     `;
   }
@@ -425,6 +510,7 @@ class TVShowMonitorPanel extends HTMLElement {
         this._manageWarning = "The show was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
         this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
         this._renderContent();
       }
     } catch (error) {
@@ -462,6 +548,52 @@ class TVShowMonitorPanel extends HTMLElement {
         this._manageWarning = "The removal was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
       } else {
         this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
+        this._renderContent();
+      }
+    } catch (error) {
+      if (generation === this._manageGeneration) {
+        this._cancelShowMutation();
+        this._manageError = this._errorText(error);
+      }
+    } finally {
+      if (generation === this._manageGeneration) {
+        this._pendingAction = null;
+        this._manageBusy = false;
+        if (this._manageOpen) this._renderManage();
+      }
+    }
+  }
+
+  async _changeShowMatch(tvmazeId) {
+    if (this._manageBusy || this._changeMatchId === null || !this._searchQuery) return;
+    const oldId = this._changeMatchId;
+    const currentCount = this._manageData?.shows?.length ?? this._lastStableShows?.length ?? 0;
+    this._beginShowMutation(currentCount, tvmazeId);
+    this._pendingAction = { type: "change", id: tvmazeId };
+    const generation = this._manageGeneration;
+    this._manageBusy = true;
+    this._manageError = "";
+    this._manageWarning = "";
+    this._renderManage();
+    try {
+      const result = await this._hass.callWS({
+        type: `${DOMAIN}/change_match`,
+        old_tvmaze_id: oldId,
+        tvmaze_id: tvmazeId,
+        query: this._searchQuery,
+      });
+      if (generation !== this._manageGeneration) return;
+      this._manageData = result;
+      this._changeMatchId = null;
+      this._searchQuery = "";
+      this._searchResults = null;
+      if (result.reloaded === false) {
+        this._cancelShowMutation();
+        this._manageWarning = "The new match was saved, but Home Assistant could not reload TV Show Monitor. Reload the integration manually to apply the change.";
+      } else {
+        this._showMutationExpectedCount = null;
+        this._showMutationNewId = null;
         this._renderContent();
       }
     } catch (error) {
@@ -570,6 +702,7 @@ class TVShowMonitorPanel extends HTMLElement {
       ? `Final episode: ${attr.final_episode_code}${attr.final_episode_name ? ` · ${attr.final_episode_name}` : ""}`
       : "";
     const runtime = recentEpisode ? null : attr.runtime;
+    const freshness = this._freshnessWarning(show);
 
     return `
       <article class="card" data-entity-id="${this._escapeAttr(show.entityId)}" tabindex="0" role="button" aria-label="Open ${this._escapeAttr(show.name)} details">
@@ -583,9 +716,31 @@ class TVShowMonitorPanel extends HTMLElement {
           ${channel ? `<div class="detail">${this._escape(channel)}</div>` : ""}
           ${finalEpisode ? `<div class="detail muted">${this._escape(finalEpisode)}</div>` : ""}
           ${runtime ? `<div class="detail muted">${this._escape(String(runtime))} min</div>` : ""}
+          ${freshness ? `<div class="detail stale-warning" role="status">${this._escape(freshness)}</div>` : ""}
         </div>
       </article>
     `;
+  }
+
+  _freshnessWarning(show) {
+    const attr = show.attr;
+    if (attr.last_attempt_successful === false) {
+      if (show.state.state === "unavailable" || show.state.state === "unknown") {
+        return "Latest update failed; schedule is not yet available.";
+      }
+      return "Latest update failed; showing the last known schedule.";
+    }
+    // A successful check without a fresh schedule is normal for ended shows.
+    if (attr.show_status === "Ended" && !show.hasEpisode) return "";
+    const timestamp = Date.parse(attr.last_successful_update);
+    if (!Number.isFinite(timestamp)) return "";
+    const interval = Number(attr.poll_interval_hours);
+    if (!Number.isFinite(interval) || interval <= 0) return "";
+    const hours = (Date.now() - timestamp) / 3600000;
+    if (hours > Math.max(48, interval * 2 + 1)) {
+      return "Schedule may be outdated; the last successful check was overdue.";
+    }
+    return "";
   }
 
   _friendlyAiring(airing, attr) {
@@ -650,6 +805,7 @@ class TVShowMonitorPanel extends HTMLElement {
   }
 
   _noEpisodeText(status, state) {
+    if (state === "unavailable" || state === "unknown") return "Schedule unavailable";
     if (status === "Ended" || state === "Ended") return "No more episodes scheduled";
     if (status === "In Development") return "In development";
     if (status === "To Be Determined") return "Schedule to be confirmed";
@@ -709,6 +865,15 @@ class TVShowMonitorPanel extends HTMLElement {
       button, input { font: inherit; }
       button { color: inherit; }
       .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+      .viewer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+      #viewer-search { flex: 1 1 230px; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--divider-color); border-radius: 9px; background: var(--card-background-color); color: var(--primary-text-color); }
+      #viewer-search:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      .viewer-filter-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+      .viewer-filter-buttons button { border: 1px solid var(--divider-color); border-radius: 9px; padding: 9px 12px; cursor: pointer; background: var(--card-background-color); }
+      .viewer-filter-buttons button[aria-pressed="true"] { border-color: var(--primary-color); background: var(--secondary-background-color); font-weight: 600; }
+      .viewer-filter-buttons button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      .stale-warning { margin-top: 4px; color: var(--warning-color, var(--primary-text-color)); font-size: 12px; }
       #content { position: relative; }
       header { margin-bottom: 28px; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
       .header-copy { min-width: 0; }
@@ -753,7 +918,7 @@ class TVShowMonitorPanel extends HTMLElement {
       .row-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
       .row-copy strong { font-size: 14px; line-height: 1.3; }
       .row-meta { color: var(--secondary-text-color); font-size: 13px; line-height: 1.35; }
-      .row-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+      .row-actions { display: flex; gap: 8px; flex: 0 0 auto; flex-wrap: wrap; }
       .search-form { display: flex; gap: 8px; }
       .search-form input { min-width: 0; flex: 1 1 auto; height: 40px; padding: 0 11px; border: 1px solid var(--divider-color); border-radius: 9px; background: var(--primary-background-color); color: var(--primary-text-color); outline: none; }
       .search-form input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
@@ -780,6 +945,7 @@ class TVShowMonitorPanel extends HTMLElement {
         .manage-dialog { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; }
         .dialog-header, .dialog-body { padding-left: 16px; padding-right: 16px; }
         .manage-row, .candidate-row { align-items: flex-start; }
+      .manage-row { flex-wrap: wrap; }
         .confirm-row { flex-direction: column; }
         .search-form { flex-direction: column; }
         .search-form .primary-button { align-self: flex-end; }

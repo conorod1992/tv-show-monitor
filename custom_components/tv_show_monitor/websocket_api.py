@@ -32,6 +32,7 @@ _REGISTERED = f"{DOMAIN}_websocket_api_registered"
 WS_CONFIG = f"{DOMAIN}/config"
 WS_SEARCH = f"{DOMAIN}/search"
 WS_ADD = f"{DOMAIN}/add"
+WS_CHANGE_MATCH = f"{DOMAIN}/change_match"
 WS_REMOVE = f"{DOMAIN}/remove"
 
 
@@ -44,6 +45,7 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_config)
     websocket_api.async_register_command(hass, websocket_search)
     websocket_api.async_register_command(hass, websocket_add)
+    websocket_api.async_register_command(hass, websocket_change_match)
     websocket_api.async_register_command(hass, websocket_remove)
     hass.data[_REGISTERED] = True
 
@@ -189,6 +191,86 @@ async def websocket_add(
         )
         return
     shows = (*current, candidate.as_configured_show(query))
+    reloaded = await _async_replace_shows(hass, entry, shows)
+    connection.send_result(msg["id"], {**_config_payload(entry), "reloaded": reloaded})
+
+
+@require_admin
+@websocket_command(
+    {
+        vol.Required("type"): WS_CHANGE_MATCH,
+        vol.Required("old_tvmaze_id"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Required("tvmaze_id"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Required("query"): vol.All(str, vol.Length(min=1, max=100)),
+    }
+)
+@async_response
+async def websocket_change_match(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Replace a followed show's TVmaze match after validating a fresh search."""
+    entry = _entry(hass)
+    if entry is None:
+        connection.send_error(
+            msg["id"], "not_configured", "TV Show Monitor is not configured"
+        )
+        return
+
+    old_id = msg["old_tvmaze_id"]
+    selected_id = msg["tvmaze_id"]
+    query = msg["query"].strip()
+    if not query:
+        connection.send_error(msg["id"], "invalid_query", "Enter a show title")
+        return
+
+    if old_id not in {show.tvmaze_id for show in _entry_shows(entry)}:
+        connection.send_error(msg["id"], "unknown_show", "That show is not configured")
+        return
+
+    client = TVMazeClient(async_get_clientsession(hass))
+    try:
+        candidates = await client.async_search_shows(query)
+    except TVMazeError as err:
+        _LOGGER.warning("Viewer TVmaze rematch search failed for %r: %s", query, err)
+        connection.send_error(
+            msg["id"], "cannot_connect", "Unable to verify the TVmaze show"
+        )
+        return
+
+    candidate = next(
+        (candidate for candidate in candidates if candidate.tvmaze_id == selected_id),
+        None,
+    )
+    if candidate is None:
+        connection.send_error(
+            msg["id"],
+            "invalid_selection",
+            "The selected show is no longer in the results",
+        )
+        return
+
+    # Search is asynchronous: use the current config, not the pre-search snapshot.
+    current = _entry_shows(entry)
+    if old_id not in {show.tvmaze_id for show in current}:
+        connection.send_error(
+            msg["id"], "unknown_show", "That show is no longer followed"
+        )
+        return
+    if any(
+        show.tvmaze_id == selected_id and show.tvmaze_id != old_id for show in current
+    ):
+        connection.send_error(
+            msg["id"], "duplicate_show", "That show is already being monitored"
+        )
+        return
+
+    replacement = candidate.as_configured_show(query)
+    shows = tuple(replacement if show.tvmaze_id == old_id else show for show in current)
+    if shows == current:
+        connection.send_result(msg["id"], {**_config_payload(entry), "reloaded": True})
+        return
     reloaded = await _async_replace_shows(hass, entry, shows)
     connection.send_result(msg["id"], {**_config_payload(entry), "reloaded": reloaded})
 

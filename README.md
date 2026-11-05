@@ -55,12 +55,23 @@ The viewer groups followed shows into:
 
 Each show card can display the poster, episode code and name, your local airing date
 and time, network or streaming service, runtime, and final-episode details where
-available. Click a card, or focus it and press **Enter** or **Space**, to open Home
+available. The viewer has a client-side show-name search and quick filters for
+**All**, **Next 7 days**, and **Not scheduled**; filtering does not cause extra
+TVmaze requests or modify the set of monitored shows. Next 7 days includes today
+and the following six local calendar days.
+
+Cards also display a short warning when the latest refresh failed or the last
+successful update is unexpectedly old relative to the configured polling cadence.
+Previously cached schedule data remains visible. Ended shows without a future episode
+are exempt from age-only warnings because they are intentionally rechecked less
+often. Click a card, or focus it and press **Enter** or **Space**, to open Home
 Assistant's normal entity details.
 
 Home Assistant administrators also see a **Manage shows** button in the viewer. It
 opens a dedicated dialog that lists the current followed shows, lets you remove a
-show with confirmation, and searches TVmaze for shows to add. Search results show
+show with confirmation, **change an existing TVmaze match**, and searches TVmaze
+for shows to add. Rematching searches and validates the replacement result before
+replacing the existing show; unsuccessful searches do not remove the current match. Search results show
 useful disambiguation details such as premiere year, country, network and status,
 and already-followed results are clearly disabled. Add/remove changes are written to
 the integration's normal config-entry options and applied through the same reload
@@ -113,7 +124,7 @@ When available, each sensor exposes:
 - next air date/time, ISO air stamp, `next_airing`, runtime and episode URL;
 - `days_until`, calculated from Home Assistant's current local date;
 - previous episode ID/name, season, episode number/code and air date/time;
-- show URL and refresh diagnostics.
+- show URL, configured polling interval and refresh diagnostics.
 
 For an ended show with no next episode, the previous episode is also exposed through
 `final_episode_*` attributes so dashboards and automations can identify the final
@@ -194,6 +205,31 @@ actions:
         {{ trigger.event.data.episode_name }}
 mode: single
 ```
+
+## Optional notification automation blueprints
+
+Two importable Home Assistant automation blueprints are maintained in the
+[blueprints/automation](blueprints/automation) directory:
+
+- [Episode notification](blueprints/automation/tv_show_monitor_episode_notification.yaml):
+  choose between the episode-today and exact-airing events.
+- [Schedule and status alerts](blueprints/automation/tv_show_monitor_schedule_alerts.yaml):
+  notify when a future schedule changes or a show status changes.
+
+In Home Assistant, open **Settings → Automations & scenes → Blueprints → Import
+blueprint**, and paste the GitHub URL of the relevant YAML file (using the **main**
+branch after release). Create an automation from the imported blueprint, select a
+`notify` entity, and optionally enter an exact show name to restrict notifications.
+For example, the episode blueprint URL is:
+
+`https://github.com/conorod1992/tv-show-monitor/blob/main/blueprints/automation/tv_show_monitor_episode_notification.yaml`
+
+These blueprints are **examples to import separately**, not files that HACS
+automatically installs into Home Assistant's blueprint directory. Notifications
+are delivered by the selected Home Assistant notify entity; the integration
+itself does not send them. Existing setups with only legacy `notify.*` actions
+and no notify entity can use the event examples above instead. The airing
+event is emitted at the known broadcast timestamp, **not in advance**.
 
 ## Polling and error preservation
 

@@ -155,7 +155,101 @@ async function checkSuccessfulAddClearsSearch() {
   assert.match(host.innerHTML, /placeholder="Search TVmaze by show title" value=""/);
 }
 
+
+function checkViewerFiltersAndStaleness() {
+  const viewer = new Panel();
+  viewer._hass = { config: { time_zone: "Europe/Dublin" }, locale: { language: "en-IE" } };
+  const upcoming = viewer._showFromState(
+    "sensor.test", showState("Severance", new Date(Date.now() + 2 * 86400000).toISOString())
+  );
+  const unscheduled = viewer._showFromState("sensor.none", showState("Other", null));
+  viewer._viewerFilter = "next7";
+  assert.equal(viewer._viewerIncludes(upcoming), true, "next seven days includes upcoming releases");
+  assert.equal(viewer._viewerIncludes(unscheduled), false, "next seven days excludes undated shows");
+  viewer._viewerFilter = "unscheduled";
+  assert.equal(viewer._viewerIncludes(unscheduled), true, "unscheduled filter includes unscheduled shows");
+  assert.equal(viewer._viewerIncludes(upcoming), false);
+  viewer._viewerFilter = "all";
+  viewer._viewerQuery = "SEVER";
+  assert.equal(viewer._viewerIncludes(upcoming), true, "text search is case insensitive");
+  assert.equal(viewer._viewerIncludes(unscheduled), false);
+
+  upcoming.attr.poll_interval_hours = 24;
+  upcoming.attr.last_successful_update = new Date(Date.now() - 72 * 3600000).toISOString();
+  upcoming.attr.last_attempt_successful = true;
+  assert.match(viewer._freshnessWarning(upcoming), /outdated/i);
+  upcoming.attr.last_successful_update = new Date().toISOString();
+  assert.equal(viewer._freshnessWarning(upcoming), "", "recent data has no warning");
+  upcoming.attr.last_attempt_successful = false;
+  assert.match(viewer._freshnessWarning(upcoming), /update failed/i);
+  unscheduled.attr.poll_interval_hours = 24;
+  unscheduled.attr.show_status = "Ended";
+  unscheduled.attr.last_successful_update = new Date(Date.now() - 90 * 86400000).toISOString();
+  unscheduled.attr.last_attempt_successful = true;
+  assert.equal(viewer._freshnessWarning(unscheduled), "",
+    "ended shows are not flagged for intentionally infrequent checks");
+  const unavailable = showState("First check failed", null);
+  unavailable.state = "unavailable";
+  unavailable.attributes.last_attempt_successful = false;
+  const firstCheck = viewer._showFromState("sensor.failed", unavailable);
+  assert.match(viewer._freshnessWarning(firstCheck), /not yet available/);
+  assert.equal(viewer._noEpisodeText(null, "unavailable"), "Schedule unavailable");
+}
+
+async function checkViewerRematch() {
+  const editor = new Panel();
+  editor._manageOpen = true;
+  editor._manageData = { shows: [{ canonical_name: "Old", tvmaze_id: 216 }], max_shows: 50 };
+  editor._changeMatchId = 216;
+  editor._searchQuery = "New";
+  editor._renderManage = () => {};
+  editor._renderContent = () => {};
+  const requests = [];
+  editor._hass = { callWS: async (payload) => {
+    requests.push(payload);
+    return { shows: [{ canonical_name: "New", tvmaze_id: 4 }], max_shows: 50, reloaded: true };
+  } };
+  assert.match(editor._manageShowRow(editor._manageData.shows[0]), /data-change-match-id="216"/);
+  editor._searchResults = [{ tvmaze_id: 4, name: "New", already_added: false }];
+  assert.match(editor._candidateRow(editor._searchResults[0]), /Use match/);
+  assert.match(editor._candidateRow({ tvmaze_id: 216, name: "Old", already_added: true }), /Current/);
+  await editor._changeShowMatch(4);
+  assert.equal(requests[0].type, "tv_show_monitor/change_match");
+  assert.equal(requests[0].old_tvmaze_id, 216);
+  assert.equal(requests[0].tvmaze_id, 4);
+  assert.equal(editor._manageData.shows[0].tvmaze_id, 4);
+  assert.equal(editor._changeMatchId, null);
+  assert.equal(editor._searchQuery, "");
+  assert.equal(editor._manageBusy, false);
+}
+
+function checkRematchViewerStability() {
+  const viewer = new Panel();
+  const content = { innerHTML: "", querySelectorAll: () => [] };
+  viewer.shadowRoot = { querySelector: () => content };
+  viewer._initialized = true;
+  const old = showState("Old match", new Date(Date.now() + 86400000).toISOString());
+  old.attributes.tvmaze_show_id = 216;
+  viewer._hass = { config: { time_zone: "UTC" }, locale: { language: "en-IE" }, states: { "sensor.old": old } };
+  viewer._renderContent();
+  viewer._beginShowMutation(1, 4);
+  assert.equal(viewer._showMutationExpectedCount, 1,
+    "same-count rematch must wait for the replacement identity");
+  viewer._hass.states = {};
+  viewer._renderContent();
+  assert.match(content.innerHTML, /Old match/, "old cards remain while replacement loads");
+  const replacement = showState("New match", new Date(Date.now() + 86400000).toISOString());
+  replacement.attributes.tvmaze_show_id = 4;
+  viewer._hass.states = { "sensor.new": replacement };
+  viewer._renderContent();
+  assert.equal(viewer._showMutationExpectedCount, null);
+  assert.match(content.innerHTML, /New match/);
+}
+
+checkRematchViewerStability();
+checkViewerFiltersAndStaleness();
 Promise.resolve()
+  .then(checkViewerRematch)
   .then(checkManageCloseInvalidatesPendingResponses)
   .then(checkSuccessfulAddClearsSearch)
   .then(() => console.log("Async management lifecycle checks passed"))
